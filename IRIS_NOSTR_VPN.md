@@ -5,17 +5,19 @@ This fork is an Iris WebVM experiment that keeps the upstream CheerpX/WebVM runt
 As of 2026-07-09, the implemented milestone is browser-side pairing:
 
 - The sidebar has a "Nostr VPN" panel.
-- The panel creates an `nvpn://join-request?...` link with a stable browser identity in `localStorage`.
+- The panel creates an `nvpn://join-request/...` QR/link with a browser AppKey, one-time request pubkey, request secret, and signed AppKey proof in `localStorage`.
 - Users can open or copy the link into the native Nostr VPN app.
-- The Tailscale panel remains the working upstream networking path.
+- The visible Tailscale networking option has been removed from this Iris fork.
+- The QR pairing state flips to paired only when a NIP-44 encrypted approval receipt addressed to the request pubkey includes the matching request secret.
 
 The next milestone is packet transport:
 
-1. Replace the scaffold browser key with the real FIPS/Nostr identity from the browser client.
-2. Determine whether CheerpX exposes a packet-level network backend that can be backed by Nostr VPN/FIPS transport.
-3. If CheerpX does not expose that layer, evaluate a v86-based WebVM profile for a custom virtual NIC.
-4. Connect virtual NIC packets to a browser Nostr VPN transport and route them through native Nostr VPN exit nodes.
-5. Keep the app deployable from `sites.iris.to`/`apps.iris.to`, with `webvm.iris.to` as the dedicated host if the CheerpX license and Cloudflare route are approved.
+1. Publish the native Nostr VPN approval receipt when the scanner accepts a full join request.
+2. Persist the request private key only as long as it is needed to receive/verify the approval receipt.
+3. Determine whether CheerpX exposes a packet-level network backend that can be backed by Nostr VPN/FIPS transport.
+4. If CheerpX does not expose that layer, evaluate a v86-based WebVM profile for a custom virtual NIC.
+5. Connect virtual NIC packets to a browser Nostr VPN transport and route them through native Nostr VPN exit nodes.
+6. Keep the app deployable from `sites.iris.to`/`apps.iris.to`, with `webvm.iris.to` as the dedicated host if the CheerpX license and Cloudflare route are approved.
 
 ## Deployment Shape
 

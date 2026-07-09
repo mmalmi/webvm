@@ -5,6 +5,8 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
+		"preview": "vite preview --host 127.0.0.1",
+		"test:e2e": "npm run build && playwright test",
 		"deploy:webvm": "node scripts/deploy-webvm.mjs",
 		"deploy:webvm:dry-run": "node scripts/deploy-webvm.mjs --dry-run"
 	},
@@ -13,6 +15,7 @@
 		"@fortawesome/fontawesome-free": "^6.6.0",
 		"@leaningtech/cheerpx": "latest",
 		"@oddbird/popover-polyfill": "^0.4.4",
+		"@playwright/test": "^1.61.1",
 		"@sveltejs/adapter-auto": "^3.0.0",
 		"@sveltejs/adapter-static": "^3.0.5",
 		"@sveltejs/kit": "^2.0.0",
@@ -21,15 +24,17 @@
 		"@xterm/addon-web-links": "^0.11.0",
 		"@xterm/xterm": "^5.5.0",
 		"autoprefixer": "^10.4.20",
+		"html2canvas-pro": "^1.5.8",
 		"labs": "git@github.com:leaningtech/labs.git",
 		"node-html-parser": "^6.1.13",
+		"nostr-tools": "^2.23.9",
 		"postcss": "^8.4.47",
 		"postcss-discard": "^2.0.0",
+		"qrcode": "^1.5.4",
 		"svelte": "^4.2.7",
 		"tailwindcss": "^3.4.9",
 		"vite": "^5.0.3",
-		"vite-plugin-static-copy": "^1.0.6",
-		"html2canvas-pro": "^1.5.8"
+		"vite-plugin-static-copy": "^1.0.6"
 	},
 	"type": "module"
 }

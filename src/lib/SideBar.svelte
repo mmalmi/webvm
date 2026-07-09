@@ -2,7 +2,6 @@
 	import { createEventDispatcher } from 'svelte';
 	import Icon from './Icon.svelte';
 	import InformationTab from './InformationTab.svelte';
-	import NetworkingTab from './NetworkingTab.svelte';
 	import NostrVpnTab from './NostrVpnTab.svelte';
 	import CpuTab from './CpuTab.svelte';
 	import DiskTab from './DiskTab.svelte';
@@ -14,7 +13,6 @@
 	import { cpuActivity, diskActivity, aiActivity } from './activities.js';
 	const icons = [
 		{ icon: 'fas fa-info-circle', info: 'Information', activity: null },
-		{ icon: 'fas fa-wifi', info: 'Networking', activity: null },
 		{ icon: 'fas fa-lock', info: 'Nostr VPN', activity: null },
 		{ icon: 'fas fa-microchip', info: 'CPU', activity: cpuActivity },
 		{ icon: 'fas fa-compact-disc', info: 'Disk', activity: diskActivity },
@@ -53,12 +51,7 @@
 	function handleClick(icon) {
 		if(sideBarPinned)
 			return;
-		// Hides the panel if the icon is active. Otherwise, shows the panel with info.
-		if (activeInfo === icon.info) {
-			activeInfo = null;
-		} else {
-			activeInfo = icon.info;
-		}
+		showInfo(icon.info);
 	}
 
 	function toggleSidebarPin() {
@@ -103,8 +96,6 @@
 			<InformationTab>
 				<slot></slot>
 			</InformationTab>
-		{:else if activeInfo === 'Networking'}
-			<NetworkingTab on:connect/>
 		{:else if activeInfo === 'Nostr VPN'}
 			<NostrVpnTab/>
 		{:else if activeInfo === 'CPU'}
