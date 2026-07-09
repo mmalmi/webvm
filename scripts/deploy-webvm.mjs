@@ -9,6 +9,7 @@ const appDir = path.resolve(__dirname, '..');
 
 const DEFAULT_WORKER_NAME = 'iris-webvm';
 const DEFAULT_DOMAIN = 'webvm.iris.to';
+const DEFAULT_ROUTE = 'apps.iris.to/webvm*';
 const DEFAULT_COMPATIBILITY_DATE = '2026-03-19';
 const DEFAULT_WRANGLER_VERSION = '4';
 
@@ -24,7 +25,7 @@ function parseArgs(argv) {
 	const options = {
 		workerName: process.env.CF_WORKER_NAME_WEBVM || DEFAULT_WORKER_NAME,
 		domain: process.env.CF_WORKER_DOMAIN_WEBVM || DEFAULT_DOMAIN,
-		route: process.env.CF_WORKER_ROUTE_WEBVM || '',
+		route: process.env.CF_WORKER_ROUTE_WEBVM || DEFAULT_ROUTE,
 		compatibilityDate: process.env.CF_WORKER_COMPATIBILITY_DATE || DEFAULT_COMPATIBILITY_DATE,
 		wranglerVersion: process.env.WRANGLER_VERSION || DEFAULT_WRANGLER_VERSION,
 		dryRun: false,
