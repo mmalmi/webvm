@@ -3,6 +3,7 @@
 	import Icon from './Icon.svelte';
 	import InformationTab from './InformationTab.svelte';
 	import NetworkingTab from './NetworkingTab.svelte';
+	import NostrVpnTab from './NostrVpnTab.svelte';
 	import CpuTab from './CpuTab.svelte';
 	import DiskTab from './DiskTab.svelte';
 	import AnthropicTab from './AnthropicTab.svelte';
@@ -14,6 +15,7 @@
 	const icons = [
 		{ icon: 'fas fa-info-circle', info: 'Information', activity: null },
 		{ icon: 'fas fa-wifi', info: 'Networking', activity: null },
+		{ icon: 'fas fa-lock', info: 'Nostr VPN', activity: null },
 		{ icon: 'fas fa-microchip', info: 'CPU', activity: cpuActivity },
 		{ icon: 'fas fa-compact-disc', info: 'Disk', activity: diskActivity },
 		{ icon: 'fas fa-robot', info: 'ClaudeAI', activity: aiActivity },
@@ -103,6 +105,8 @@
 			</InformationTab>
 		{:else if activeInfo === 'Networking'}
 			<NetworkingTab on:connect/>
+		{:else if activeInfo === 'Nostr VPN'}
+			<NostrVpnTab/>
 		{:else if activeInfo === 'CPU'}
 			<CpuTab/>
 		{:else if activeInfo === 'Disk'}

@@ -4,7 +4,9 @@
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build"
+		"build": "vite build",
+		"deploy:webvm": "node scripts/deploy-webvm.mjs",
+		"deploy:webvm:dry-run": "node scripts/deploy-webvm.mjs --dry-run"
 	},
 	"devDependencies": {
 		"@anthropic-ai/sdk": "^0.33.0",

@@ -21,4 +21,4 @@
 	{/if}
 </PanelButton>
 <p>WebVM can connect to the Internet via Tailscale</p>
-<p>Using Tailscale is required since browser do not support TCP/UDP sockets (yet!)</p>
+<p>Tailscale is the upstream WebVM network path. Use the Nostr VPN tab to pair an Iris experiment.</p>
