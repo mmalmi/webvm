@@ -17,8 +17,26 @@ function withWebVmHeaders(response) {
 	});
 }
 
+function shouldRedirectToHttps(request, url) {
+	const forwardedProto = request.headers.get('x-forwarded-proto');
+	if (forwardedProto) {
+		return forwardedProto.toLowerCase() === 'http';
+	}
+	if (request.cf && !request.cf.tlsVersion) {
+		return true;
+	}
+	return url.protocol === 'http:';
+}
+
 export default {
 	async fetch(request, env) {
+		const url = new URL(request.url);
+		if (shouldRedirectToHttps(request, url)) {
+			url.protocol = 'https:';
+			url.port = '';
+			return Response.redirect(url.toString(), 308);
+		}
+
 		const response = await env.ASSETS.fetch(request);
 		return withWebVmHeaders(response);
 	},
