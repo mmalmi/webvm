@@ -34,7 +34,6 @@ Defaults:
 
 - Worker name: `iris-webvm`
 - Custom domain: `webvm.iris.to`
-- Fallback route: `apps.iris.to/webvm*`
 - Static assets: `build`
 - Worker script: `scripts/webvm-worker.mjs`
 

@@ -17,28 +17,9 @@ function withWebVmHeaders(response) {
 	});
 }
 
-function rewriteWebVmSubpath(request) {
-	const url = new URL(request.url);
-	if (url.pathname === '/webvm') {
-		url.pathname = '/webvm/';
-		return Response.redirect(url.toString(), 308);
-	}
-	if (!url.pathname.startsWith('/webvm/')) {
-		return request;
-	}
-
-	url.pathname = url.pathname.slice('/webvm'.length) || '/';
-	return new Request(url, request);
-}
-
 export default {
 	async fetch(request, env) {
-		const assetRequest = rewriteWebVmSubpath(request);
-		if (assetRequest instanceof Response) {
-			return assetRequest;
-		}
-
-		const response = await env.ASSETS.fetch(assetRequest);
+		const response = await env.ASSETS.fetch(request);
 		return withWebVmHeaders(response);
 	},
 };
