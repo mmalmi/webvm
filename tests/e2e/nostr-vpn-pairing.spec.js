@@ -1,7 +1,18 @@
 import { expect, test } from '@playwright/test';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { finalizeEvent, generateSecretKey, getPublicKey, nip44, SimplePool } from 'nostr-tools';
+import { networkInterface } from '../../src/lib/network.js';
+import {
+	assertCheerpXPacketBackendCapability,
+	createEndpointDataBridge,
+	getNostrVpnTransportStatus,
+	inspectCheerpXPacketBackendCapability,
+	NostrVpnPacketBackendUnavailableError,
+	validatePacketBackend,
+} from '../../src/lib/nostrVpnTransport.js';
+import { createV86PacketBackend } from '../../src/lib/v86PacketBackend.js';
 
 const FACT_OP_KIND = 7368;
 const RECEIPT_TYPE = 'nostr_identity_device_approval_receipt';
@@ -138,6 +149,149 @@ function buildNativeApprovalReceiptEvent(identity) {
 	);
 }
 
+async function readInstalledCheerpXPackage() {
+	const packageUrl = new URL('../../node_modules/@leaningtech/cheerpx/package.json', import.meta.url);
+	const typesUrl = new URL('../../node_modules/@leaningtech/cheerpx/index.d.ts', import.meta.url);
+	return {
+		packageJson: JSON.parse(await readFile(packageUrl, 'utf8')),
+		typeDeclarations: await readFile(typesUrl, 'utf8'),
+	};
+}
+
+test('Nostr VPN fork does not expose the old Tailscale hash network interface', () => {
+	expect(networkInterface).toBeUndefined();
+});
+
+test('Nostr VPN VM packet transport requires an explicit raw packet backend', () => {
+	const status = getNostrVpnTransportStatus();
+	expect(status).toMatchObject({
+		state: 'packet-backend-unavailable',
+		canRouteVmTraffic: false,
+		connected: false,
+	});
+	expect(status.requiredMethods).toEqual(expect.arrayContaining([
+		'onTxPacket(handler: (packet: Uint8Array) => void): () => void',
+		'injectRxPacket(packet: Uint8Array): Promise<void> | void',
+		'mtu: number',
+	]));
+	expect(() => validatePacketBackend({ mtu: 1200 })).toThrow(/onTxPacket/);
+	expect(validatePacketBackend({
+		mtu: 1200,
+		onTxPacket: () => () => {},
+		injectRxPacket: async () => {},
+	})).toBeTruthy();
+});
+
+test('installed CheerpX package fails clearly without a raw packet NIC API', async () => {
+	const { packageJson, typeDeclarations } = await readInstalledCheerpXPackage();
+	const options = {
+		packageName: packageJson.name,
+		packageVersion: packageJson.version,
+		typeDeclarations,
+	};
+	const report = inspectCheerpXPacketBackendCapability(options);
+
+	expect(report).toMatchObject({
+		available: false,
+		package: `${packageJson.name}@${packageJson.version}`,
+		controlPlaneFields: [
+			'authKey',
+			'controlUrl',
+			'loginUrlCb',
+			'stateUpdateCb',
+			'netmapUpdateCb',
+		],
+		missingCapabilities: [
+			'outboundPacketCallback',
+			'inboundPacketInjection',
+			'linkMetadata',
+		],
+	});
+	expect(report.reason).toContain('raw packet/NIC API');
+	expect(report.reason).toContain('no fallback networking');
+
+	expect(() => assertCheerpXPacketBackendCapability(options))
+		.toThrow(NostrVpnPacketBackendUnavailableError);
+});
+
+test('v86 packet backend maps net0 events to the Nostr VPN packet contract', () => {
+	const listeners = new Map();
+	const received = [];
+	const emulator = {
+		add_listener(event, listener) {
+			listeners.set(event, listener);
+		},
+		remove_listener(event, listener) {
+			if (listeners.get(event) === listener) {
+				listeners.delete(event);
+			}
+		},
+		bus: {
+			send(event, packet) {
+				received.push({ event, packet });
+			},
+		},
+	};
+
+	const backend = createV86PacketBackend(emulator, { mtu: 900 });
+	const outbound = [];
+	const stop = backend.onTxPacket((packet) => outbound.push(packet));
+	const packet = new Uint8Array([1, 2, 3]);
+
+	listeners.get('net0-send')(packet);
+	backend.injectRxPacket(new Uint8Array([4, 5, 6]));
+	stop();
+
+	expect(backend.mtu).toBe(900);
+	expect(outbound).toEqual([packet]);
+	expect(received).toEqual([{ event: 'net0-receive', packet: new Uint8Array([4, 5, 6]) }]);
+	expect(listeners.has('net0-send')).toBe(false);
+});
+
+test('endpoint-data bridge moves VM packets over the FIPS endpoint API', () => {
+	let txHandler;
+	let endpointHandler;
+	const sent = [];
+	const injected = [];
+	const packetBackend = validatePacketBackend({
+		mtu: 1200,
+		onTxPacket(handler) {
+			txHandler = handler;
+			return () => {
+				txHandler = null;
+			};
+		},
+		injectRxPacket(packet) {
+			injected.push(packet);
+		},
+	});
+	const fipsNode = {
+		sendEndpointData(args) {
+			sent.push(args);
+		},
+		on(event, handler) {
+			expect(event).toBe('endpointData');
+			endpointHandler = handler;
+			return () => {
+				endpointHandler = null;
+			};
+		},
+	};
+
+	const stop = createEndpointDataBridge({ packetBackend, fipsNode, dst: 'peer-pubkey' });
+	const txPacket = new Uint8Array([7, 8, 9]);
+	const rxPacket = new Uint8Array([10, 11, 12]);
+
+	txHandler(txPacket);
+	endpointHandler({ payload: rxPacket });
+	stop();
+
+	expect(sent).toEqual([{ dst: 'peer-pubkey', payload: txPacket }]);
+	expect(injected).toEqual([rxPacket]);
+	expect(txHandler).toBeNull();
+	expect(endpointHandler).toBeNull();
+});
+
 test('Nostr VPN join QR auto-detects native acceptance through a relay', async ({ page }) => {
 	const relay = await startRelay();
 	try {
@@ -185,6 +339,13 @@ test('Nostr VPN join QR auto-detects native acceptance through a relay', async (
 		expect(accepted.paired.rosterOpId).toBe('1'.repeat(64));
 		await expect(page.getByText('Native app accepted')).toBeVisible();
 		await expect(page.getByText(TEST_PROFILE_ID)).toBeVisible();
+		await expect(page.getByTestId('nostr-vpn-transport-status')).toContainText('Packet backend unavailable');
+		const transportStatus = await page.evaluate(() => window.irisWebvmNostrVpn.transportStatus());
+		expect(transportStatus).toMatchObject({
+			state: 'packet-backend-unavailable',
+			canRouteVmTraffic: false,
+			connected: false,
+		});
 	} finally {
 		await relay.stop();
 	}

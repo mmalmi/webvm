@@ -11,11 +11,13 @@
 		startNostrVpnReceiptListener,
 		updateNostrVpnNodeName,
 	} from '$lib/nostrVpn.js';
+	import { getNostrVpnTransportStatus } from '$lib/nostrVpnTransport.js';
 
 	let nodeName = '';
 	let qrCodeDataUrl = '';
 	let qrRenderId = 0;
 	let mounted = false;
+	const transportStatus = getNostrVpnTransportStatus();
 
 	$: nodeName = $nostrVpnIdentity.nodeName;
 	$: joinRequestLink = createJoinRequestLink($nostrVpnIdentity);
@@ -151,6 +153,13 @@
 			{#if $nostrVpnIdentity.paired.networkName}
 				<div class="mt-1 text-xs text-emerald-200">{$nostrVpnIdentity.paired.networkName}</div>
 			{/if}
+		</div>
+		<div
+			data-testid="nostr-vpn-transport-status"
+			class="rounded-md bg-neutral-700 p-3 text-gray-100 shadow-md shadow-neutral-900"
+		>
+			<div class="font-semibold">VM network</div>
+			<div class="mt-1 text-xs text-amber-200">{transportStatus.summary}</div>
 		</div>
 	{:else}
 		<p class="text-gray-300">Scan this request with a Nostr VPN admin device.</p>

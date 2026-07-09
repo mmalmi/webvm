@@ -9,6 +9,7 @@ import {
 	verifyEvent,
 } from 'nostr-tools';
 import { get, writable } from 'svelte/store';
+import { getNostrVpnTransportStatus } from '$lib/nostrVpnTransport.js';
 
 const STORAGE_KEY = 'iris-webvm.nostr-vpn.identity.v2';
 const DEFAULT_NODE_NAME = 'Iris WebVM';
@@ -323,6 +324,7 @@ if (browser) {
 		acceptApprovalReceipt: handleNostrVpnApprovalReceiptEvent,
 		joinRequestLink: createJoinRequestLink,
 		startReceiptListener: startNostrVpnReceiptListener,
+		transportStatus: getNostrVpnTransportStatus,
 	};
 	globalThis.addEventListener('nvpn:join-request-accepted', (event) => {
 		markNostrVpnPaired(event.detail || {});
