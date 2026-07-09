@@ -17,7 +17,9 @@ import { createV86PacketBackend } from '../../src/lib/v86PacketBackend.js';
 
 const FACT_OP_KIND = 7368;
 const RECEIPT_TYPE = 'nostr_identity_device_approval_receipt';
+const APPROVAL_CONTEXT_TYPE = 'nostr-vpn.join-request-approval-context';
 const TEST_PROFILE_ID = '550e8400-e29b-41d4-a716-446655440000';
+const TEST_MESH_NETWORK_ID = '8d4f34f5425bc50e';
 
 async function availablePort() {
 	return new Promise((resolve, reject) => {
@@ -132,7 +134,7 @@ function hexToBytes(hex) {
 	return bytes;
 }
 
-function buildNativeApprovalReceiptEvent(identity) {
+function buildNativeApprovalEvents(identity) {
 	const signerSecretKey = generateSecretKey();
 	const approvedByPubkey = getPublicKey(signerSecretKey);
 	const approvedAt = Math.floor(Date.now() / 1000);
@@ -164,7 +166,7 @@ function buildNativeApprovalReceiptEvent(identity) {
 		signerSecretKey,
 		identity.requestPubkeyHex,
 	);
-	return finalizeEvent(
+	const receiptEvent = finalizeEvent(
 		{
 			kind: FACT_OP_KIND,
 			content: nip44.v2.encrypt(JSON.stringify(receipt), conversationKey),
@@ -177,6 +179,32 @@ function buildNativeApprovalReceiptEvent(identity) {
 		},
 		signerSecretKey,
 	);
+	const context = {
+		schema: 1,
+		profileId: TEST_PROFILE_ID,
+		requestPubkey: identity.requestPubkeyHex,
+		deviceAppKeyPubkey: identity.appPubkeyHex,
+		approvedByPubkey,
+		approvedAt,
+		requestSecret: identity.requestSecret,
+		meshNetworkId: TEST_MESH_NETWORK_ID,
+		networkName: 'Home',
+		rosterOpId,
+	};
+	const contextEvent = finalizeEvent(
+		{
+			kind: FACT_OP_KIND,
+			content: nip44.v2.encrypt(JSON.stringify(context), conversationKey),
+			created_at: approvedAt,
+			tags: [
+				['type', APPROVAL_CONTEXT_TYPE],
+				['p', identity.requestPubkeyHex],
+				['i', TEST_PROFILE_ID, 'subject'],
+			],
+		},
+		signerSecretKey,
+	);
+	return { receiptEvent, contextEvent };
 }
 
 async function readInstalledCheerpXPackage() {
@@ -326,7 +354,7 @@ test('Nostr VPN join QR auto-detects native acceptance through a relay', async (
 	const relay = await startRelay();
 	try {
 		await page.goto('/');
-		await page.getByTestId('sidebar-nostr-vpn').click();
+		await page.getByTestId('sidebar-nostr-vpn').hover();
 
 		await expect(page.getByTestId('nostr-vpn-qr')).toHaveAttribute(
 			'src',
@@ -340,14 +368,16 @@ test('Nostr VPN join QR auto-detects native acceptance through a relay', async (
 			return window.irisWebvmNostrVpn.startReceiptListener([relayUrl]);
 		}, relay.url);
 		expect(listenerStarted).toBe(true);
+		await page.waitForTimeout(250);
 
 		const identity = await page.evaluate(() => {
 			const raw = localStorage.getItem('iris-webvm.nostr-vpn.identity.v2');
 			return JSON.parse(raw);
 		});
-		const receiptEvent = buildNativeApprovalReceiptEvent(identity);
+		const { receiptEvent, contextEvent } = buildNativeApprovalEvents(identity);
 		const pool = new SimplePool();
 		try {
+			await Promise.any(pool.publish([relay.url], contextEvent, { maxWait: 5_000 }));
 			await Promise.any(pool.publish([relay.url], receiptEvent, { maxWait: 5_000 }));
 		} finally {
 			pool.close([relay.url]);
@@ -367,8 +397,10 @@ test('Nostr VPN join QR auto-detects native acceptance through a relay', async (
 		expect(accepted.link).toContain('nvpn://join-request/');
 		expect(accepted.paired.profileId).toBe(TEST_PROFILE_ID);
 		expect(accepted.paired.rosterOpId).toBe('1'.repeat(64));
+		expect(accepted.paired.meshNetworkId).toBe(TEST_MESH_NETWORK_ID);
+		expect(accepted.paired.adminPubkeyHex).toBe(receiptEvent.pubkey);
 		await expect(page.getByText('Native app accepted')).toBeVisible();
-		await expect(page.getByText(TEST_PROFILE_ID)).toBeVisible();
+		await expect(page.getByText('Home')).toBeVisible();
 		await expect(page.getByTestId('nostr-vpn-transport-status')).toContainText('FIPS transport ready');
 		await expect.poll(
 			() => page.evaluate(() => window.irisWebvmNostrVpn.transportStatus()),

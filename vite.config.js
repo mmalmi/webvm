@@ -21,7 +21,9 @@ export default defineConfig({
 				{ src: 'serviceWorker.js', dest: '' },
 				{ src: 'login.html', dest: '' },
 				{ src: 'assets/', dest: '' },
-				{ src: 'documents/', dest: '' }
+				{ src: 'documents/', dest: '' },
+				{ src: 'node_modules/v86/build/v86.wasm', dest: 'v86' },
+				{ src: 'node_modules/v86/build/v86-fallback.wasm', dest: 'v86' }
 			]
 		})
 	]

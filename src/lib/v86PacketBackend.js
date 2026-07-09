@@ -1,4 +1,8 @@
 import { validatePacketBackend } from './nostrVpnTransport.js';
+import {
+	createV86L3PacketBackend,
+	deriveMeshTunnelIpv4,
+} from './v86L3Gateway.js';
 
 function toUint8Array(packet) {
 	if (packet instanceof Uint8Array) {
@@ -37,4 +41,28 @@ export function createV86PacketBackend(emulator, { id = 0, mtu = 1200 } = {}) {
 			emulator.bus.send(rxEvent, toUint8Array(packet));
 		},
 	});
+}
+
+export async function createNostrVpnV86PacketBackend(
+	emulator,
+	{
+		networkId,
+		appPubkeyHex,
+		id = 0,
+		ethernetMtu = 1500,
+		mtu = 1280,
+		gatewayIp,
+		gatewayMac,
+		dnsServers,
+	} = {},
+) {
+	const guestIp = await deriveMeshTunnelIpv4(networkId, appPubkeyHex);
+	const ethernetBackend = createV86PacketBackend(emulator, { id, mtu: ethernetMtu });
+	return validatePacketBackend(createV86L3PacketBackend(ethernetBackend, {
+		guestIp,
+		gatewayIp,
+		gatewayMac,
+		dnsServers,
+		mtu,
+	}));
 }

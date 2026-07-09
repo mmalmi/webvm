@@ -13,7 +13,7 @@ export default defineConfig({
 	webServer: {
 		command: 'npm run preview -- --port 4173',
 		url: 'http://127.0.0.1:4173',
-		reuseExistingServer: !process.env.CI,
+		reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === '1' && !process.env.CI,
 		timeout: 60_000,
 	},
 });

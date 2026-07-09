@@ -10,6 +10,10 @@ import {
 } from 'nostr-tools';
 import { get, writable } from 'svelte/store';
 import {
+	FIPS_ADVERT_KIND,
+	FIPS_DEFAULT_DISCOVERY_APP,
+} from '@fips/transport-webrtc';
+import {
 	DEFAULT_FIPS_RELAYS,
 	createNostrVpnFipsSession,
 	normalizeFipsRelays,
@@ -23,6 +27,7 @@ const JOIN_REQUEST_TYPE = 'nostr-vpn.join-request';
 const PROOF_KIND = 7368;
 const PROOF_TYPE = 'nostr_identity_device_approval_proof';
 const RECEIPT_TYPE = 'nostr_identity_device_approval_receipt';
+const APPROVAL_CONTEXT_TYPE = 'nostr-vpn.join-request-approval-context';
 const DEFAULT_RECEIPT_RELAYS = ['wss://temp.iris.to', 'wss://relay.damus.io', 'wss://nos.lol'];
 
 let receiptPool;
@@ -33,6 +38,7 @@ let lastReceiptRelays = DEFAULT_FIPS_RELAYS;
 let fipsSession = null;
 let fipsSessionRelayKey = '';
 let fipsSessionPubkey = '';
+let pendingApprovalContext = null;
 
 function bytesToHex(bytes) {
 	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -76,6 +82,10 @@ function bytesToBase64Url(bytes) {
 
 function isHex64(value) {
 	return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value);
+}
+
+function isCompressedPubkeyHex(value) {
+	return typeof value === 'string' && /^(02|03)[0-9a-f]{64}$/i.test(value);
 }
 
 function cleanNodeName(value) {
@@ -214,6 +224,149 @@ function parseApprovalReceiptEvent(event, identity = get(nostrVpnIdentity)) {
 	return receipt;
 }
 
+function parseApprovalContextEvent(event, identity = get(nostrVpnIdentity)) {
+	if (!event || event.kind !== PROOF_KIND || !verifyEvent(event)) {
+		return null;
+	}
+	if (!eventHasTag(event, 'type', APPROVAL_CONTEXT_TYPE) || !eventHasTag(event, 'p', identity.requestPubkeyHex)) {
+		return null;
+	}
+	const conversationKey = nip44.v2.utils.getConversationKey(
+		hexToBytes(identity.requestSecretKeyHex),
+		event.pubkey,
+	);
+	const context = JSON.parse(nip44.v2.decrypt(event.content, conversationKey));
+	if (
+		context.schema !== 1
+		|| context.requestPubkey !== identity.requestPubkeyHex
+		|| context.deviceAppKeyPubkey !== identity.appPubkeyHex
+		|| context.approvedByPubkey !== event.pubkey
+		|| context.approvedAt !== event.created_at
+		|| context.requestSecret !== identity.requestSecret
+		|| typeof context.meshNetworkId !== 'string'
+		|| context.meshNetworkId.trim().length === 0
+	) {
+		return null;
+	}
+	return {
+		schema: 1,
+		profileId: String(context.profileId || ''),
+		requestPubkey: context.requestPubkey,
+		deviceAppKeyPubkey: context.deviceAppKeyPubkey,
+		approvedByPubkey: context.approvedByPubkey,
+		approvedAt: context.approvedAt,
+		requestSecret: context.requestSecret,
+		meshNetworkId: context.meshNetworkId.trim(),
+		networkName: String(context.networkName || '').trim(),
+		rosterOpId: String(context.rosterOpId || '').trim(),
+	};
+}
+
+function contextMatchesReceipt(context, receipt) {
+	return Boolean(
+		context
+		&& receipt
+		&& context.requestPubkey === receipt.requestPubkey
+		&& context.deviceAppKeyPubkey === receipt.deviceAppKeyPubkey
+		&& context.approvedByPubkey === receipt.approvedByPubkey
+		&& context.approvedAt === receipt.approvedAt
+		&& context.requestSecret === receipt.requestSecret
+		&& (!context.profileId || context.profileId === receipt.profileId)
+	);
+}
+
+function mergeApprovalContext(context) {
+	if (!context) {
+		return false;
+	}
+	let merged = false;
+	nostrVpnIdentity.update((identity) => {
+		if (
+			context.requestSecret !== identity.requestSecret
+			|| context.requestPubkey !== identity.requestPubkeyHex
+			|| context.deviceAppKeyPubkey !== identity.appPubkeyHex
+			|| !identity.paired
+			|| (
+				identity.paired.adminPubkeyHex
+				&& identity.paired.adminPubkeyHex !== context.approvedByPubkey
+			)
+		) {
+			return identity;
+		}
+		merged = true;
+		return {
+			...identity,
+			paired: {
+				...identity.paired,
+				adminPubkeyHex: context.approvedByPubkey,
+				meshNetworkId: context.meshNetworkId,
+				networkName: context.networkName || identity.paired.networkName,
+				profileId: context.profileId || identity.paired.profileId,
+				rosterOpId: context.rosterOpId || identity.paired.rosterOpId,
+			},
+		};
+	});
+	if (merged) {
+		void startNostrVpnFipsTransport().catch(() => {});
+	}
+	return merged;
+}
+
+function fipsAdvertEndpoint(event) {
+	try {
+		const advert = JSON.parse(event.content);
+		const endpoint = advert.endpoints?.find((candidate) =>
+			candidate?.transport === 'webrtc' && isCompressedPubkeyHex(candidate.addr)
+		);
+		return endpoint?.addr?.toLowerCase() || '';
+	} catch {
+		return '';
+	}
+}
+
+async function waitForNativeFipsEndpoint({
+	relays,
+	author,
+	discoveryApp = FIPS_DEFAULT_DISCOVERY_APP,
+	timeoutMs = 15_000,
+} = {}) {
+	if (!isHex64(author)) {
+		throw new Error('Nostr VPN native approval pubkey is required before attaching VM packets');
+	}
+	const relayList = normalizeFipsRelays(relays);
+	const pool = new SimplePool();
+	try {
+		return await new Promise((resolve, reject) => {
+			let subscription;
+			const timer = setTimeout(() => {
+				subscription?.close?.();
+				reject(new Error('Nostr VPN native FIPS WebRTC advert was not found'));
+			}, timeoutMs);
+			subscription = pool.subscribeMany(
+				relayList,
+				{
+					kinds: [FIPS_ADVERT_KIND],
+					authors: [author],
+					'#d': [discoveryApp],
+				},
+				{
+					onevent(event) {
+						const endpoint = fipsAdvertEndpoint(event);
+						if (!endpoint) {
+							return;
+						}
+						clearTimeout(timer);
+						subscription?.close?.();
+						resolve(endpoint);
+					},
+				},
+			);
+		});
+	} finally {
+		pool.close(relayList);
+	}
+}
+
 export const nostrVpnIdentity = writable(readIdentity());
 export const nostrVpnAction = writable('idle');
 export const nostrVpnTransportStatus = writable(getNostrVpnTransportStatus());
@@ -257,9 +410,11 @@ export function markNostrVpnPaired(detail = {}) {
 		paired: {
 			pairedAt: new Date().toISOString(),
 			adminNpub: String(detail.adminNpub || detail.admin_npub || ''),
+			adminPubkeyHex: String(detail.adminPubkeyHex || detail.admin_pubkey_hex || detail.approvedByPubkey || ''),
 			networkName: String(detail.networkName || detail.network_name || ''),
 			profileId: String(detail.profileId || detail.profile_id || ''),
 			rosterOpId: String(detail.rosterOpId || detail.roster_op_id || ''),
+			meshNetworkId: String(detail.meshNetworkId || detail.mesh_network_id || ''),
 		},
 	}));
 	nostrVpnAction.set('paired');
@@ -273,24 +428,49 @@ export function handleNostrVpnApprovalReceiptEvent(event) {
 		if (!receipt) {
 			return false;
 		}
+		const context = contextMatchesReceipt(pendingApprovalContext, receipt)
+			? pendingApprovalContext
+			: null;
+		if (context) {
+			pendingApprovalContext = null;
+		}
 		return markNostrVpnPaired({
 			requestSecret: receipt.requestSecret,
 			adminNpub: nip19.npubEncode(receipt.approvedByPubkey),
-			networkName: receipt.profileId,
+			adminPubkeyHex: receipt.approvedByPubkey,
+			networkName: context?.networkName || receipt.profileId,
 			profileId: receipt.profileId,
-			rosterOpId: receipt.rosterOpId || '',
+			rosterOpId: context?.rosterOpId || receipt.rosterOpId || '',
+			meshNetworkId: context?.meshNetworkId || '',
 		});
 	} catch {
 		return false;
 	}
 }
 
-export function startNostrVpnReceiptListener(relays = DEFAULT_RECEIPT_RELAYS) {
+export function handleNostrVpnApprovalContextEvent(event) {
+	try {
+		const context = parseApprovalContextEvent(event);
+		if (!context) {
+			return false;
+		}
+		pendingApprovalContext = context;
+		return mergeApprovalContext(context);
+	} catch {
+		return false;
+	}
+}
+
+export function handleNostrVpnRelayEvent(event) {
+	return handleNostrVpnApprovalReceiptEvent(event) || handleNostrVpnApprovalContextEvent(event);
+}
+
+export function startNostrVpnReceiptListener(relays = null) {
 	if (!browser) {
 		return false;
 	}
 	const identity = get(nostrVpnIdentity);
-	const normalizedRelays = normalizeFipsRelays(relays);
+	const normalizedRelays = normalizeFipsRelays(relays || lastReceiptRelays || DEFAULT_RECEIPT_RELAYS);
 	lastReceiptRelays = normalizedRelays;
 	if (identity.paired) {
 		receiptSubscription?.close?.();
@@ -306,18 +486,22 @@ export function startNostrVpnReceiptListener(relays = DEFAULT_RECEIPT_RELAYS) {
 	receiptPool ||= new SimplePool();
 	subscribedRequestPubkey = identity.requestPubkeyHex;
 	subscribedReceiptRelayKey = relayKey;
-	receiptSubscription = receiptPool.subscribeMany(
+	const approvalSub = receiptPool.subscribeMany(
 		normalizedRelays,
 		{
 			kinds: [PROOF_KIND],
 			'#p': [identity.requestPubkeyHex],
-			'#type': [RECEIPT_TYPE],
 			since: Math.max(0, identity.requestedAt - 60),
 		},
 		{
-			onevent: handleNostrVpnApprovalReceiptEvent,
+			onevent: handleNostrVpnRelayEvent,
 		},
 	);
+	receiptSubscription = {
+		close() {
+			approvalSub?.close?.();
+		},
+	};
 	return true;
 }
 
@@ -332,6 +516,26 @@ export async function startNostrVpnFipsTransport(options = {}) {
 	const relays = normalizeFipsRelays(options.relays || lastReceiptRelays || DEFAULT_FIPS_RELAYS);
 	const relayKey = relays.join('\n');
 	const packetBridgeRequested = Boolean(options.packetBackend);
+	let exitPeerPubkeyHex = options.exitPeerPubkeyHex || '';
+	if (packetBridgeRequested) {
+		if (!identity.paired.meshNetworkId) {
+			throw new Error('Nostr VPN mesh network id is required before attaching VM packets');
+		}
+		if (!exitPeerPubkeyHex) {
+			nostrVpnTransportStatus.set({
+				...getNostrVpnTransportStatus(),
+				state: 'fips-waiting-native-advert',
+				summary: 'Waiting for native FIPS WebRTC advert',
+				relays,
+			});
+			exitPeerPubkeyHex = await waitForNativeFipsEndpoint({
+				relays,
+				author: identity.paired.adminPubkeyHex,
+				discoveryApp: options.discoveryApp,
+				timeoutMs: options.nativeAdvertTimeoutMs,
+			});
+		}
+	}
 	if (
 		fipsSession
 		&& fipsSessionPubkey === identity.appPubkeyHex
@@ -357,7 +561,7 @@ export async function startNostrVpnFipsTransport(options = {}) {
 			autoConnect: options.autoConnect ?? true,
 			acceptConnections: options.acceptConnections ?? true,
 			packetBackend: options.packetBackend || null,
-			exitPeerPubkeyHex: options.exitPeerPubkeyHex || '',
+			exitPeerPubkeyHex,
 			logger: options.logger,
 		});
 		fipsSessionRelayKey = relayKey;
@@ -405,6 +609,8 @@ if (browser) {
 	globalThis.irisWebvmNostrVpn = {
 		acceptPairing: markNostrVpnPaired,
 		acceptApprovalReceipt: handleNostrVpnApprovalReceiptEvent,
+		acceptApprovalContext: handleNostrVpnApprovalContextEvent,
+		acceptRelayEvent: handleNostrVpnRelayEvent,
 		joinRequestLink: createJoinRequestLink,
 		startReceiptListener: startNostrVpnReceiptListener,
 		startFipsTransport: startNostrVpnFipsTransport,
