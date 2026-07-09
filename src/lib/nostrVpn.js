@@ -9,6 +9,11 @@ import {
 	verifyEvent,
 } from 'nostr-tools';
 import { get, writable } from 'svelte/store';
+import {
+	DEFAULT_FIPS_RELAYS,
+	createNostrVpnFipsSession,
+	normalizeFipsRelays,
+} from '$lib/nostrVpnFips.js';
 import { getNostrVpnTransportStatus } from '$lib/nostrVpnTransport.js';
 
 const STORAGE_KEY = 'iris-webvm.nostr-vpn.identity.v2';
@@ -24,6 +29,10 @@ let receiptPool;
 let receiptSubscription;
 let subscribedRequestPubkey = '';
 let subscribedReceiptRelayKey = '';
+let lastReceiptRelays = DEFAULT_FIPS_RELAYS;
+let fipsSession = null;
+let fipsSessionRelayKey = '';
+let fipsSessionPubkey = '';
 
 function bytesToHex(bytes) {
 	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -207,6 +216,7 @@ function parseApprovalReceiptEvent(event, identity = get(nostrVpnIdentity)) {
 
 export const nostrVpnIdentity = writable(readIdentity());
 export const nostrVpnAction = writable('idle');
+export const nostrVpnTransportStatus = writable(getNostrVpnTransportStatus());
 
 nostrVpnIdentity.subscribe((identity) => persistIdentity(identity));
 
@@ -227,6 +237,7 @@ export function updateNostrVpnNodeName(nodeName) {
 export function resetNostrVpnIdentity() {
 	nostrVpnIdentity.set(createIdentity());
 	nostrVpnAction.set('reset');
+	void stopNostrVpnFipsTransport();
 }
 
 export function markJoinRequestOpened() {
@@ -252,6 +263,7 @@ export function markNostrVpnPaired(detail = {}) {
 		},
 	}));
 	nostrVpnAction.set('paired');
+	void startNostrVpnFipsTransport().catch(() => {});
 	return true;
 }
 
@@ -278,13 +290,15 @@ export function startNostrVpnReceiptListener(relays = DEFAULT_RECEIPT_RELAYS) {
 		return false;
 	}
 	const identity = get(nostrVpnIdentity);
+	const normalizedRelays = normalizeFipsRelays(relays);
+	lastReceiptRelays = normalizedRelays;
 	if (identity.paired) {
 		receiptSubscription?.close?.();
 		subscribedRequestPubkey = '';
 		subscribedReceiptRelayKey = '';
 		return false;
 	}
-	const relayKey = relays.map((relay) => String(relay).trim()).filter(Boolean).join('\n');
+	const relayKey = normalizedRelays.join('\n');
 	if (subscribedRequestPubkey === identity.requestPubkeyHex && subscribedReceiptRelayKey === relayKey) {
 		return false;
 	}
@@ -293,7 +307,7 @@ export function startNostrVpnReceiptListener(relays = DEFAULT_RECEIPT_RELAYS) {
 	subscribedRequestPubkey = identity.requestPubkeyHex;
 	subscribedReceiptRelayKey = relayKey;
 	receiptSubscription = receiptPool.subscribeMany(
-		relays,
+		normalizedRelays,
 		{
 			kinds: [PROOF_KIND],
 			'#p': [identity.requestPubkeyHex],
@@ -305,6 +319,75 @@ export function startNostrVpnReceiptListener(relays = DEFAULT_RECEIPT_RELAYS) {
 		},
 	);
 	return true;
+}
+
+export async function startNostrVpnFipsTransport(options = {}) {
+	if (!browser) {
+		return get(nostrVpnTransportStatus);
+	}
+	const identity = get(nostrVpnIdentity);
+	if (!identity.paired) {
+		throw new Error('Nostr VPN pairing is required before starting FIPS transport');
+	}
+	const relays = normalizeFipsRelays(options.relays || lastReceiptRelays || DEFAULT_FIPS_RELAYS);
+	const relayKey = relays.join('\n');
+	const packetBridgeRequested = Boolean(options.packetBackend);
+	if (
+		fipsSession
+		&& fipsSessionPubkey === identity.appPubkeyHex
+		&& fipsSessionRelayKey === relayKey
+		&& (!packetBridgeRequested || fipsSession.status.packetBridgeAttached)
+	) {
+		return fipsSession.status;
+	}
+	await stopNostrVpnFipsTransport();
+	nostrVpnTransportStatus.set({
+		...getNostrVpnTransportStatus(),
+		state: 'fips-starting',
+		summary: 'Starting FIPS transport',
+		relays,
+	});
+	try {
+		fipsSession = await createNostrVpnFipsSession({
+			identity,
+			relays,
+			stunServers: options.stunServers || [],
+			discoveryApp: options.discoveryApp,
+			advertiseOnNostr: options.advertiseOnNostr ?? true,
+			autoConnect: options.autoConnect ?? true,
+			acceptConnections: options.acceptConnections ?? true,
+			packetBackend: options.packetBackend || null,
+			exitPeerPubkeyHex: options.exitPeerPubkeyHex || '',
+			logger: options.logger,
+		});
+		fipsSessionRelayKey = relayKey;
+		fipsSessionPubkey = identity.appPubkeyHex;
+		nostrVpnTransportStatus.set(fipsSession.status);
+		return fipsSession.status;
+	} catch (error) {
+		fipsSession = null;
+		fipsSessionRelayKey = '';
+		fipsSessionPubkey = '';
+		nostrVpnTransportStatus.set({
+			...getNostrVpnTransportStatus(),
+			state: 'fips-start-failed',
+			summary: error instanceof Error ? error.message : 'FIPS transport failed to start',
+			relays,
+		});
+		throw error;
+	}
+}
+
+export async function stopNostrVpnFipsTransport() {
+	const session = fipsSession;
+	fipsSession = null;
+	fipsSessionRelayKey = '';
+	fipsSessionPubkey = '';
+	if (session) {
+		await session.stop();
+	}
+	nostrVpnTransportStatus.set(getNostrVpnTransportStatus());
+	return get(nostrVpnTransportStatus);
 }
 
 export async function copyJoinRequestLink() {
@@ -324,7 +407,9 @@ if (browser) {
 		acceptApprovalReceipt: handleNostrVpnApprovalReceiptEvent,
 		joinRequestLink: createJoinRequestLink,
 		startReceiptListener: startNostrVpnReceiptListener,
-		transportStatus: getNostrVpnTransportStatus,
+		startFipsTransport: startNostrVpnFipsTransport,
+		stopFipsTransport: stopNostrVpnFipsTransport,
+		transportStatus: () => get(nostrVpnTransportStatus),
 	};
 	globalThis.addEventListener('nvpn:join-request-accepted', (event) => {
 		markNostrVpnPaired(event.detail || {});

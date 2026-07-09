@@ -3,6 +3,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { finalizeEvent, generateSecretKey, getPublicKey, nip44, SimplePool } from 'nostr-tools';
+import { FIPS_ADVERT_KIND, FIPS_DEFAULT_DISCOVERY_APP } from '@fips/transport-webrtc';
 import { networkInterface } from '../../src/lib/network.js';
 import {
 	assertCheerpXPacketBackendCapability,
@@ -92,6 +93,35 @@ async function startRelay() {
 			});
 		},
 	};
+}
+
+async function waitForRelayEvent(relayUrl, filter, predicate = () => true) {
+	const pool = new SimplePool();
+	try {
+		return await new Promise((resolve, reject) => {
+			let subscription;
+			const timer = setTimeout(() => {
+				subscription?.close?.();
+				reject(new Error(`timed out waiting for relay event on ${relayUrl}`));
+			}, 8_000);
+			subscription = pool.subscribeMany(
+				[relayUrl],
+				filter,
+				{
+					onevent(event) {
+						if (!predicate(event)) {
+							return;
+						}
+						clearTimeout(timer);
+						subscription?.close?.();
+						resolve(event);
+					},
+				},
+			);
+		});
+	} finally {
+		pool.close([relayUrl]);
+	}
 }
 
 function hexToBytes(hex) {
@@ -339,13 +369,57 @@ test('Nostr VPN join QR auto-detects native acceptance through a relay', async (
 		expect(accepted.paired.rosterOpId).toBe('1'.repeat(64));
 		await expect(page.getByText('Native app accepted')).toBeVisible();
 		await expect(page.getByText(TEST_PROFILE_ID)).toBeVisible();
-		await expect(page.getByTestId('nostr-vpn-transport-status')).toContainText('Packet backend unavailable');
-		const transportStatus = await page.evaluate(() => window.irisWebvmNostrVpn.transportStatus());
-		expect(transportStatus).toMatchObject({
-			state: 'packet-backend-unavailable',
+		await expect(page.getByTestId('nostr-vpn-transport-status')).toContainText('FIPS transport ready');
+		await expect.poll(
+			() => page.evaluate(() => window.irisWebvmNostrVpn.transportStatus()),
+			{ timeout: 10_000 },
+		).toMatchObject({
+			state: 'fips-ready-packet-backend-unavailable',
 			canRouteVmTraffic: false,
 			connected: false,
+			xOnlyPubkeyHex: identity.appPubkeyHex,
 		});
+		const transportStatus = await page.evaluate(() => window.irisWebvmNostrVpn.transportStatus());
+		const advertEvent = await waitForRelayEvent(
+			relay.url,
+			{
+				kinds: [FIPS_ADVERT_KIND],
+				authors: [identity.appPubkeyHex],
+				'#d': [FIPS_DEFAULT_DISCOVERY_APP],
+			},
+			(event) => {
+				const advert = JSON.parse(event.content);
+				return advert.endpoints?.some((endpoint) => endpoint.addr === transportStatus.publicKeyHex);
+			},
+		);
+		const advert = JSON.parse(advertEvent.content);
+
+		expect(transportStatus).toMatchObject({
+			state: 'fips-ready-packet-backend-unavailable',
+			canRouteVmTraffic: false,
+			connected: false,
+			xOnlyPubkeyHex: identity.appPubkeyHex,
+			relays: [relay.url],
+		});
+		expect(transportStatus.publicKeyHex).toHaveLength(66);
+		expect(advertEvent.pubkey).toBe(identity.appPubkeyHex);
+		expect(advertEvent.tags).toEqual(expect.arrayContaining([
+			['d', FIPS_DEFAULT_DISCOVERY_APP],
+			['protocol', FIPS_DEFAULT_DISCOVERY_APP],
+			['version', '1'],
+		]));
+		expect(advert).toMatchObject({
+			identifier: FIPS_DEFAULT_DISCOVERY_APP,
+			version: 1,
+			signalRelays: [relay.url],
+			stunServers: [],
+		});
+		expect(advert.endpoints).toEqual([
+			{
+				transport: 'webrtc',
+				addr: transportStatus.publicKeyHex,
+			},
+		]);
 	} finally {
 		await relay.stop();
 	}
