@@ -22,7 +22,7 @@ WebVM is powered by the **CheerpX** virtualization engine, which provides:
 
 ## Iris Nostr VPN Experiment
 
-This checkout includes an Iris experiment that adds a "Nostr VPN" sidebar panel. As of 2026-07-09 it creates an `nvpn://join-request` link for pairing the browser VM with the native Nostr VPN app; packet transport through Nostr VPN exit nodes is tracked in [IRIS_NOSTR_VPN.md](IRIS_NOSTR_VPN.md).
+This checkout includes an Iris experiment that adds a "Nostr VPN" sidebar panel. As of 2026-07-09 it creates an `nvpn://join-request` link for pairing the browser VM with the native Nostr VPN app, and pairing completion is detected from an encrypted Nostr approval receipt. Packet transport through Nostr VPN exit nodes is tracked in [IRIS_NOSTR_VPN.md](IRIS_NOSTR_VPN.md).
 
 ## Table of Contents
 

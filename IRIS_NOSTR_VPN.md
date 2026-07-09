@@ -2,22 +2,23 @@
 
 This fork is an Iris WebVM experiment that keeps the upstream CheerpX/WebVM runtime and adds a Nostr VPN pairing panel.
 
-As of 2026-07-09, the implemented milestone is browser-side pairing:
+As of 2026-07-09, the implemented milestone is relay-backed pairing:
 
 - The sidebar has a "Nostr VPN" panel.
 - The panel creates an `nvpn://join-request/...` QR/link with a browser AppKey, one-time request pubkey, request secret, and signed AppKey proof in `localStorage`.
 - Users can open or copy the link into the native Nostr VPN app.
 - The visible Tailscale networking option has been removed from this Iris fork.
 - The QR pairing state flips to paired only when a NIP-44 encrypted approval receipt addressed to the request pubkey includes the matching request secret.
+- The native Nostr VPN app publishes the approval receipt when an admin imports a full join request.
+- The Playwright e2e starts a local Nostr relay, subscribes from WebVM, publishes a native-shaped approval receipt, and verifies that the VM auto-detects the paired state.
 
 The next milestone is packet transport:
 
-1. Publish the native Nostr VPN approval receipt when the scanner accepts a full join request.
-2. Persist the request private key only as long as it is needed to receive/verify the approval receipt.
-3. Determine whether CheerpX exposes a packet-level network backend that can be backed by Nostr VPN/FIPS transport.
-4. If CheerpX does not expose that layer, evaluate a v86-based WebVM profile for a custom virtual NIC.
-5. Connect virtual NIC packets to a browser Nostr VPN transport and route them through native Nostr VPN exit nodes.
-6. Keep the app deployable from `sites.iris.to`/`apps.iris.to`, with `webvm.iris.to` as the dedicated host if the CheerpX license and Cloudflare route are approved.
+1. Persist the request private key only as long as it is needed to receive/verify the approval receipt.
+2. Determine whether CheerpX exposes a packet-level network backend that can be backed by Nostr VPN/FIPS transport. The installed `@leaningtech/cheerpx` package exposes Tailscale-style `authKey`, `controlUrl`, `loginUrlCb`, `stateUpdateCb`, and `netmapUpdateCb` hooks, but not a raw packet interface.
+3. If CheerpX does not expose that layer, evaluate a v86-based WebVM profile for a custom virtual NIC.
+4. Connect virtual NIC packets to a browser Nostr VPN transport and route them through native Nostr VPN exit nodes.
+5. Keep the app deployable from `sites.iris.to`/`apps.iris.to`, with `webvm.iris.to` as the dedicated host if the CheerpX license and Cloudflare route are approved.
 
 ## Deployment Shape
 

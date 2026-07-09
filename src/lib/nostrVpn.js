@@ -22,6 +22,7 @@ const DEFAULT_RECEIPT_RELAYS = ['wss://temp.iris.to', 'wss://relay.damus.io', 'w
 let receiptPool;
 let receiptSubscription;
 let subscribedRequestPubkey = '';
+let subscribedReceiptRelayKey = '';
 
 function bytesToHex(bytes) {
 	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -279,14 +280,17 @@ export function startNostrVpnReceiptListener(relays = DEFAULT_RECEIPT_RELAYS) {
 	if (identity.paired) {
 		receiptSubscription?.close?.();
 		subscribedRequestPubkey = '';
+		subscribedReceiptRelayKey = '';
 		return false;
 	}
-	if (subscribedRequestPubkey === identity.requestPubkeyHex) {
+	const relayKey = relays.map((relay) => String(relay).trim()).filter(Boolean).join('\n');
+	if (subscribedRequestPubkey === identity.requestPubkeyHex && subscribedReceiptRelayKey === relayKey) {
 		return false;
 	}
 	receiptSubscription?.close?.();
 	receiptPool ||= new SimplePool();
 	subscribedRequestPubkey = identity.requestPubkeyHex;
+	subscribedReceiptRelayKey = relayKey;
 	receiptSubscription = receiptPool.subscribeMany(
 		relays,
 		{
@@ -318,6 +322,7 @@ if (browser) {
 		acceptPairing: markNostrVpnPaired,
 		acceptApprovalReceipt: handleNostrVpnApprovalReceiptEvent,
 		joinRequestLink: createJoinRequestLink,
+		startReceiptListener: startNostrVpnReceiptListener,
 	};
 	globalThis.addEventListener('nvpn:join-request-accepted', (event) => {
 		markNostrVpnPaired(event.detail || {});
