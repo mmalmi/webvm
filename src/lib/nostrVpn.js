@@ -472,7 +472,7 @@ export function startNostrVpnReceiptListener(relays = null) {
 	const identity = get(nostrVpnIdentity);
 	const normalizedRelays = normalizeFipsRelays(relays || lastReceiptRelays || DEFAULT_RECEIPT_RELAYS);
 	lastReceiptRelays = normalizedRelays;
-	if (identity.paired) {
+	if (identity.paired?.meshNetworkId) {
 		receiptSubscription?.close?.();
 		subscribedRequestPubkey = '';
 		subscribedReceiptRelayKey = '';

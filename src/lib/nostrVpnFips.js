@@ -90,10 +90,12 @@ export async function createNostrVpnFipsSession({
 		if (!isHex(exitPeerPubkeyHex, 66)) {
 			throw new TypeError('Nostr VPN packet bridge requires a 33-byte compressed exit peer pubkey');
 		}
+		const exitPeerAddr = exitPeerPubkeyHex.toLowerCase();
+		await node.connect({ transport: 'webrtc', addr: exitPeerAddr });
 		packetBridgeStop = createEndpointDataBridge({
 			packetBackend,
 			fipsNode: node,
-			dst: exitPeerPubkeyHex.toLowerCase(),
+			dst: exitPeerAddr,
 		});
 	}
 

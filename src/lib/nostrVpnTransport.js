@@ -138,12 +138,29 @@ export function createEndpointDataBridge({ packetBackend, fipsNode, dst }) {
 		throw new TypeError('Nostr VPN bridge missing destination pubkey');
 	}
 
+	const debug = typeof globalThis !== 'undefined' && globalThis.irisWebvmV86TestHooks
+		? (globalThis.irisWebvmNostrVpnBridgeDebug = {
+				dst,
+				txPackets: [],
+				rxPackets: [],
+				sendErrors: [],
+				injectErrors: [],
+			})
+		: null;
 	const offPacket = packetBackend.onTxPacket((packet) => {
-		void fipsNode.sendEndpointData({ dst, payload: packet });
+		debug?.txPackets.push({ bytes: packet.length, prefixHex: Array.from(packet.slice(0, 8), (byte) => byte.toString(16).padStart(2, '0')).join('') });
+		void fipsNode.sendEndpointData({ dst, payload: packet }).catch((error) => {
+			debug?.sendErrors.push(error instanceof Error ? error.message : String(error));
+		});
 	});
 	const offEndpoint = fipsNode.on('endpointData', (event) => {
 		if (event?.payload instanceof Uint8Array) {
-			void packetBackend.injectRxPacket(event.payload);
+			debug?.rxPackets.push({ bytes: event.payload.length, prefixHex: Array.from(event.payload.slice(0, 8), (byte) => byte.toString(16).padStart(2, '0')).join('') });
+			try {
+				void packetBackend.injectRxPacket(event.payload);
+			} catch (error) {
+				debug?.injectErrors.push(error instanceof Error ? error.message : String(error));
+			}
 		}
 	});
 

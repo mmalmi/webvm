@@ -38,11 +38,19 @@
 	$: paired = Boolean($nostrVpnIdentity.paired);
 	$: networkId = meshNetworkId($nostrVpnIdentity);
 	$: pairedContextKey = JSON.stringify($nostrVpnIdentity.paired || {});
-	$: currentAttachKey = paired && emulator
+	$: currentAttachKey = paired && emulator && networkId
 		? `${$nostrVpnIdentity.appPubkeyHex}:${networkId}:${pairedContextKey}`
 		: '';
 	$: if (mounted && currentAttachKey && currentAttachKey !== lastAttachKey && !attachInFlight) {
 		void attachNostrVpnPacketBackend(currentAttachKey);
+	}
+	$: if (mounted && paired && emulator && !networkId && bridgeState !== 'waiting-native-mesh-context' && !attachInFlight) {
+		packetBackend = null;
+		backendStatus = null;
+		bridgeError = '';
+		bridgeState = 'waiting-native-mesh-context';
+		bridgeSummary = 'Waiting for native mesh context';
+		publishDebugState();
 	}
 	$: if (mounted && !paired && bridgeState !== 'waiting-pairing') {
 		resetBridgeState();
