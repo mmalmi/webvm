@@ -8,6 +8,7 @@
 		"guest:build": "bash scripts/build-v86-guest.sh",
 		"preview": "vite preview --host 127.0.0.1",
 		"test:e2e": "npm run build && playwright test",
+		"test:production": "playwright test --config playwright.production.config.js",
 		"deploy:webvm": "node scripts/deploy-webvm.mjs",
 		"deploy:webvm:dry-run": "node scripts/deploy-webvm.mjs --dry-run"
 	},
