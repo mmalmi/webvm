@@ -13,9 +13,11 @@ test('WebVM Worker redirects HTTP to HTTPS', async () => {
 });
 
 test('WebVM Worker isolates the privileged VM origin', async () => {
+	const appCsp = "default-src 'self'; script-src 'self' 'sha256-test'";
 	const response = await worker.fetch(
 		new Request('https://webvm.iris.to/v86'),
-		{ ASSETS: { fetch: () => new Response('<!doctype html>', {
+		{ ASSETS: { fetch: () => new Response(
+			`<!doctype html><meta http-equiv="content-security-policy" content="${appCsp}">`, {
 			headers: { 'content-type': 'text/html' },
 		}) } },
 	);
@@ -28,8 +30,7 @@ test('WebVM Worker isolates the privileged VM origin', async () => {
 	expect(response.headers.get('referrer-policy')).toBe('no-referrer');
 	expect(response.headers.get('permissions-policy')).toContain('camera=()');
 	const csp = response.headers.get('content-security-policy') || '';
-	expect(csp).toContain("default-src 'self'");
-	expect(csp).toContain("frame-ancestors 'none'");
-	expect(csp).toContain("object-src 'none'");
+	expect(csp).toBe("frame-ancestors 'none'");
 	expect(csp).not.toContain('plausible.leaningtech.com');
+	expect(await response.text()).toContain(appCsp);
 });
