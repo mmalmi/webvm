@@ -189,11 +189,11 @@ test('WebVM rejects pubsub access from non-local FIPS peers', async () => {
 	});
 	const adapter = new FipsPubsubWireAdapter();
 
-	await expect(node.receive(fipsContext(adapter.encodeOutbound({
+	expect(() => node.receive(fipsContext(adapter.encodeOutbound({
 		type: 'req',
 		subscriptionId: 'remote-request',
 		filters: [{ kinds: [7368] }],
-	}), []))).rejects.toThrow(/restricted to local Ethernet guests/);
+	}), []))).toThrow(/restricted to local Ethernet guests/);
 	expect(relayClient.requests).toHaveLength(0);
 	expect(bridge.stats.unauthorizedPeers).toBe(1);
 
