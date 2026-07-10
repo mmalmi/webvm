@@ -700,7 +700,7 @@ async function describeFipsAttachFailure(page) {
 		guestState = await runSerialCommand(
 			page,
 			'FIPS attach diagnostics',
-			"printf '%s\\n' '--- OPENRC ---'; rc-service webvm-underlay status 2>&1 || true; rc-service webvm-nvpn status 2>&1 || true; rc-service webvm-hashtree status 2>&1 || true; printf '%s\\n' '--- PROCESS ---'; pgrep -af 'nvpn webvm-guest' 2>&1 || true; printf '%s\\n' '--- PACKET SOCKETS ---'; cat /proc/net/packet 2>&1 || true; printf '%s\\n' '--- LINK ---'; ip -s link show eth0 2>&1 || true; ip -o address show dev eth0 2>&1 || true; printf '%s\\n' '--- ROUTES ---'; ip route show table all 2>&1 || true; ip -6 route show table all 2>&1 || true; printf '%s\\n' '--- REDACTED ERRORS ---'; grep -Ei 'error|failed|ethernet|awaiting|active' /var/log/webvm-nvpn.log 2>/dev/null | tail -40 | sed -E 's#nvpn://[^[:space:]]+#[redacted]#g; s#npub1[a-z0-9]+#npub1[redacted]#g; s#[0-9a-fA-F]{64}#[redacted]#g' || true",
+			"printf '%s\\n' '--- OPENRC ---'; rc-service webvm-underlay status 2>&1 || true; rc-service webvm-nvpn status 2>&1 || true; rc-service webvm-hashtree status 2>&1 || true; printf '%s\\n' '--- PROCESS ---'; pgrep -af 'nvpn webvm-guest' 2>&1 || true; pgrep -af 'htree.*start' 2>&1 || true; printf '%s\\n' '--- PACKET SOCKETS ---'; cat /proc/net/packet 2>&1 || true; printf '%s\\n' '--- LINK ---'; ip -s link show eth0 2>&1 || true; ip -s link show htree0 2>&1 || true; ip -o address show dev eth0 2>&1 || true; printf '%s\\n' '--- ROUTES ---'; ip route show table all 2>&1 || true; ip -6 route show table all 2>&1 || true; printf '%s\\n' '--- REDACTED NVPN ERRORS ---'; grep -Ei 'error|failed|ethernet|awaiting|active' /var/log/webvm-nvpn.log 2>/dev/null | tail -40 | sed -E 's#nvpn://[^[:space:]]+#[redacted]#g; s#npub1[a-z0-9]+#npub1[redacted]#g; s#[0-9a-fA-F]{64}#[redacted]#g' || true; printf '%s\\n' '--- HASHTREE LOG ---'; tail -60 /var/log/webvm-hashtree.log 2>/dev/null || true",
 			30_000,
 		);
 	} catch (error) {
@@ -754,7 +754,12 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 			const diagnostics = await describeFipsAttachFailure(page);
 			throw new Error(`${error.message}: ${diagnostics}`);
 		}
-		await assertStableGuestFmpLinks(page);
+		try {
+			await assertStableGuestFmpLinks(page);
+		} catch (error) {
+			const diagnostics = await describeFipsAttachFailure(page);
+			throw new Error(`${error.message}: ${diagnostics}`);
+		}
 
 		const shellReady = await runSerialCommand(page, 'guest shell readiness', "printf 'SHELL_READY\\n'");
 		expect(shellReady).toContain('SHELL_READY');
