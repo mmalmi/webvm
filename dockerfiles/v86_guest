@@ -1,0 +1,73 @@
+FROM i386/alpine:3.22@sha256:934f9c1fd4821fb1ba834a9f6b7ff6be379af70dec156e7e59c2f8e716632e65
+
+ENV KERNEL=virt
+
+RUN apk add --no-cache \
+    agetty \
+    alpine-base \
+    alpine-conf \
+    bind-tools \
+    ca-certificates \
+    curl \
+    git \
+    iproute2 \
+    iptables \
+    libqrencode-tools \
+    linux-firmware-none \
+    linux-virt \
+    openrc
+
+RUN apk del libqrencode-tools
+
+COPY nvpn /usr/local/bin/nvpn
+COPY htree /usr/local/bin/htree
+COPY git-remote-htree /usr/local/bin/git-remote-htree
+COPY webvm-profile.sh /etc/profile.d/webvm.sh
+COPY webvm-network.sh /usr/local/sbin/webvm-network
+COPY webvm-tun.sh /usr/local/sbin/webvm-tun
+COPY webvm-nvpn.sh /usr/local/sbin/webvm-nvpn
+COPY webvm-pair.sh /usr/local/bin/webvm-pair
+COPY webvm-underlay.openrc /etc/init.d/webvm-underlay
+COPY webvm-hashtree.openrc /etc/init.d/webvm-hashtree
+COPY webvm-nvpn.openrc /etc/init.d/webvm-nvpn
+COPY webvm-hashtree.toml /var/lib/hashtree/config/config.toml
+
+RUN chmod 0755 \
+      /usr/local/bin/nvpn \
+      /usr/local/bin/htree \
+      /usr/local/bin/git-remote-htree \
+      /usr/local/bin/webvm-pair \
+      /usr/local/sbin/webvm-network \
+      /usr/local/sbin/webvm-tun \
+      /usr/local/sbin/webvm-nvpn \
+      /etc/init.d/webvm-underlay \
+      /etc/init.d/webvm-hashtree \
+      /etc/init.d/webvm-nvpn \
+      /etc/profile.d/webvm.sh && \
+    sed -i 's/getty 38400 tty1/agetty --autologin root tty1 linux/' /etc/inittab && \
+    printf '%s\n' 'ttyS0::respawn:/sbin/agetty --autologin root -s ttyS0 115200 vt100' >> /etc/inittab && \
+    printf 'root:\n' | chpasswd && \
+    setup-hostname webvm && \
+    mkdir -p /var/lib/nvpn /var/lib/hashtree/data /run/webvm && \
+    chmod 0700 /var/lib/nvpn /var/lib/hashtree/config && \
+    sha256sum \
+      /usr/local/bin/nvpn \
+      /usr/local/bin/htree \
+      /usr/local/bin/git-remote-htree \
+      >/etc/webvm-guest-binaries.sha256 && \
+    for service in devfs dmesg mdev hwdrivers; do rc-update add "$service" sysinit; done && \
+    for service in hwclock modules sysctl hostname syslog bootmisc; do rc-update add "$service" boot; done && \
+    rc-update add webvm-underlay default && \
+    rc-update add webvm-hashtree default && \
+    rc-update add webvm-nvpn default && \
+    rc-update add killprocs shutdown && \
+    kernel_release=$(cat /usr/share/kernel/virt/kernel.release) && \
+    mkinitfs -F 'base virtio 9p' "$kernel_release" && \
+    find "/lib/modules/$kernel_release/kernel" -type f \
+      ! -path '*/drivers/net/tun.ko*' \
+      ! -path '*/drivers/net/macvlan.ko*' \
+      ! -path '*/net/packet/af_packet.ko*' \
+      -delete && \
+    find "/lib/modules/$kernel_release/kernel" -depth -type d -empty -delete && \
+    depmod -a "$kernel_release" && \
+    rm -rf /usr/share/kernel /etc/mkinitfs

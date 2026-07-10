@@ -4,7 +4,8 @@
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build",
+		"build": "node scripts/assert-v86-guest-assets.mjs && vite build",
+		"guest:build": "bash scripts/build-v86-guest.sh",
 		"preview": "vite preview --host 127.0.0.1",
 		"test:e2e": "npm run build && playwright test",
 		"deploy:webvm": "node scripts/deploy-webvm.mjs",
@@ -27,19 +28,22 @@
 		"html2canvas-pro": "^1.5.8",
 		"labs": "git@github.com:leaningtech/labs.git",
 		"node-html-parser": "^6.1.13",
-		"nostr-tools": "^2.23.9",
 		"postcss": "^8.4.47",
 		"postcss-discard": "^2.0.0",
 		"qrcode": "^1.5.4",
 		"svelte": "^4.2.7",
 		"tailwindcss": "^3.4.9",
 		"vite": "^5.0.3",
-		"vite-plugin-static-copy": "^1.0.6"
+		"vite-plugin-static-copy": "^1.0.6",
+		"zxing-wasm": "^3.1.0"
 	},
 	"type": "module",
 	"dependencies": {
-		"@fips/core": "file:vendor/fips/fips-core-0.0.1.tgz",
-		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.1.tgz",
+		"@fips/core": "file:vendor/fips/fips-core-0.0.11.tgz",
+		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.11.tgz",
+		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.14.tgz",
+		"nostr-pubsub": "file:vendor/nostr-pubsub-0.1.2.tgz",
+		"nostr-tools": "^2.23.9",
 		"v86": "^0.5.424"
 	}
 }

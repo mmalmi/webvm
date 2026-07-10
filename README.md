@@ -20,13 +20,13 @@ WebVM is powered by the **CheerpX** virtualization engine, which provides:
 - Linux syscall emulator
 - Safe, sandboxed client-side execution
 
-## Iris Nostr VPN Experiment
+## Iris WebVM
 
-This checkout includes an Iris experiment that adds a "Nostr VPN" sidebar panel. As of 2026-07-09 it creates an `nvpn://join-request` link for pairing the browser VM with the native Nostr VPN app, and pairing completion is detected from an encrypted Nostr approval receipt. Packet transport through Nostr VPN exit nodes is tracked in [IRIS_NOSTR_VPN.md](IRIS_NOSTR_VPN.md).
+This fork boots an Alpine i686 guest with v86 and a same-origin, content-addressed root filesystem. The browser runs a generic FIPS router between the v86 Ethernet device and FIPS WebRTC peers. Nostr VPN identity, QR pairing, approval, TUN configuration, and exit-node policy belong to `nvpn` inside the guest. There is no browser-side VPN management panel or alternate networking path. See [IRIS_NOSTR_VPN.md](IRIS_NOSTR_VPN.md).
 
 ## Table of Contents
 
-- [Iris Nostr VPN Experiment](#iris-nostr-vpn-experiment)
+- [Iris WebVM](#iris-webvm)
 - [Networking](#networking)
 - [Development & Customization](#development--customization)
   - [Deploy to GitHub Pages](#deploy-to-github-pages)
@@ -43,62 +43,9 @@ This checkout includes an Iris experiment that adds a "Nostr VPN" sidebar panel.
 
 ## Networking
 
-WebVM supports **Tailscale** integration. So your browser VM can reach your private network and, with an exit node, the public internet too.
+The guest sees a virtio Ethernet interface. EtherType `0x2121` carries FIPS link records to a generic browser router, which forwards FIPS traffic over WebRTC. Before VPN approval, this path provides FIPS services such as targeted Nostr pubsub and Hashtree. After approval, guest-side `nvpn` owns private routes and public Internet exit traffic.
 
-> [!NOTE]
-> Some low-level networking operations (especially ICMP used by `ping`) are not currently available in this environment. For connectivity checks, use `curl` or `wget`.
-
-### Local network
-
-1.  Open the "Networking" panel from the sidebar
-2.  Click "Connect to Tailscale"
-3.  Log in (create a free account at [tailscale.com](https://tailscale.com) if needed)
-4.  Click "Connect" when prompted
-
-WebVM now has access to all machines in your Tailscale network!
-
-### Internet Usage Tips
-
-> [!TIP]
-> On slower connections there may be a short delay before initialisation. Connection status is shown as a colored dot on the button: orange = local network, green = global/internet. The button text shows your Tailscale IP address once connected.
-
-To access the public internet from WebVM, set up an **Exit Node** on another device in your Tailscale network:
-
-1. Follow the [Tailscale Exit Node quickstart](https://tailscale.com/kb/1408/quick-guide-exit-nodes?tab=linux) (sections: "Advertise a device as an exit node")
-2. WebVM automatically uses the exit node once advertised
-
-### Using an Auth Key
-
-As an alternative to interactive login, add your Tailscale auth key to the URL fragment:
-
-```
-https://webvm.io/#authKey=<your-ephemeral-key>
-```
-
-This is equivalent to Tailscale's `--login-server` option.
-
-> [!TIP]
-> If you also need a custom control server, add `controlUrl` in the same URL fragment and separate values with `&`, for example: `#authKey=...&controlUrl=...`.
-
-### Self-Hosting Tailscale with Headscale
-
-We also support [headscale](https://headscale.net/stable/), a selfhosted open source implementation of the Tailscale control server.
-Because Headscale does not add CORS headers by default, you will need a proxy in front of it. See the [Headscale reverse proxy setup docs](https://headscale.net/stable/ref/integration/reverse-proxy/#nginx) for an example.
-
-Once ready, add the following line to your `location /` block in your nginx config file.
-
-```nginx
-if ($http_origin = "https://yourdomain.com") {
-    add_header 'Access-Control-Allow-Origin' "$http_origin";
-    add_header 'Access-Control-Allow-Credentials' 'true' always;
-}
-```
-
-Then access WebVM with:
-
-```
-https://yourdomain.com/#controlUrl=<your-headscale-url>
-```
+Pairing uses a persistent `nvpn://join-request/...` containing the guest AppKey npub, a separate request npub, and a high-entropy request secret. Approval events are signed, NIP-44 encrypted to the request key, and delivered through bounded FIPS pubsub on service port `7368`.
 
 ## Development & Customization
 
@@ -217,7 +164,6 @@ To access Claude AI, you need an API key. Follow these steps to get started:
 **Articles & Resources:**
 
 - [WebVM: Server-less x86 virtual machines in the browser](https://leaningtech.com/webvm-server-less-x86-virtual-machines-in-the-browser/)
-- [WebVM: Linux Virtualization in WebAssembly with Full Networking via Tailscale](https://leaningtech.com/webvm-virtual-machine-with-networking-via-tailscale/)
 - [Mini.WebVM: Your own Linux box from Dockerfile, virtualized in the browser via WebAssembly](https://leaningtech.com/mini-webvm-your-linux-box-from-dockerfile-via-wasm/)
 - [Crafting the Impossible: X86 Virtualization in the Browser with WebAssembly](https://www.youtube.com/watch?v=VqrbVycTXmw) — Talk at JsNation 2022
 
@@ -231,7 +177,7 @@ This project is powered by:
 
 - **[CheerpX](https://cheerpx.io/)** — x86-to-WebAssembly JIT compiler | by [Leaning Technologies](https://leaningtech.com/)
 - **[xterm.js](https://xtermjs.org/)** — Web-based terminal emulator
-- **[Tailscale](https://tailscale.com/)** — VPN networking layer
+- **[FIPS](https://github.com/mmalmi/fips)** — authenticated browser/guest networking layer
 - **[lwIP](https://savannah.nongnu.org/projects/lwip/)** — TCP/IP stack, compiled for the Web via [Cheerp](https://github.com/leaningtech/cheerp-meta/)
 
 **Versioning:**

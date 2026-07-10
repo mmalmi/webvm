@@ -1,0 +1,25 @@
+#!/sbin/openrc-run
+
+description="WebVM Hashtree daemon over FIPS Ethernet"
+command="/usr/local/bin/htree"
+command_args="--data-dir /var/lib/hashtree/data start"
+command_background="yes"
+pidfile="/run/webvm/hashtree.pid"
+output_log="/var/log/webvm-hashtree.log"
+error_log="/var/log/webvm-hashtree.log"
+
+export HTREE_ALLOW_ROOT_DAEMON=1
+export HTREE_CONFIG_DIR=/var/lib/hashtree/config
+export HTREE_DATA_DIR=/var/lib/hashtree/data
+export HTREE_LOCAL_DAEMON_ONLY=1
+
+depend() {
+    need webvm-underlay
+}
+
+start_pre() {
+    checkpath --directory --mode 0755 /run/webvm
+    checkpath --directory --mode 0700 /var/lib/hashtree/config
+    checkpath --directory --mode 0700 /var/lib/hashtree/data
+    checkpath --file --mode 0600 /var/log/webvm-hashtree.log
+}

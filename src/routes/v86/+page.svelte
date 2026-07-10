@@ -1,92 +1,38 @@
 <script>
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount } from 'svelte';
-	import { get } from 'svelte/store';
-	import NostrVpnTab from '$lib/NostrVpnTab.svelte';
-	import {
-		nostrVpnIdentity,
-		nostrVpnTransportStatus,
-		startNostrVpnFipsTransport,
-		stopNostrVpnFipsTransport,
-	} from '$lib/nostrVpn.js';
-	import { createNostrVpnV86PacketBackend } from '$lib/v86PacketBackend.js';
+	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
 	import '$lib/global.css';
+	import '@xterm/xterm/css/xterm.css';
 
 	const BIOS_URL = '/v86/seabios.bin';
 	const VGA_BIOS_URL = '/v86/vgabios.bin';
 	const V86_WASM_URL = '/v86/v86.wasm';
-	const BUILDROOT_KERNEL_URL = 'https://i.copy.sh/buildroot-bzimage68.bin';
+	const GUEST_FS_URL = '/v86/guest/fs.json';
+	const GUEST_ROOTFS_URL = '/v86/guest/rootfs/';
+	const SERIAL_BUFFER_LIMIT = 128 * 1024;
 
-	let mounted = false;
 	let destroyed = false;
 	let screenContainer;
 	let serialConsole;
+	let serialTerminal = null;
+	let serialInputDisposable = null;
 	let emulator = null;
-	let packetBackend = null;
-	let startedWithPacketBackend = false;
-	let attachInFlight = false;
-	let lastAttachKey = '';
+	let fipsHost = null;
 	let vmState = 'loading';
-	let vmSummary = 'Loading v86';
+	let vmSummary = 'Loading WebVM';
 	let vmError = '';
-	let bridgeState = 'waiting-pairing';
-	let bridgeSummary = 'Pair with Nostr VPN';
-	let bridgeError = '';
-	let backendStatus = null;
-	let lastTransportStatus = null;
-
-	$: paired = Boolean($nostrVpnIdentity.paired);
-	$: networkId = meshNetworkId($nostrVpnIdentity);
-	$: pairedContextKey = JSON.stringify($nostrVpnIdentity.paired || {});
-	$: currentAttachKey = paired && emulator && networkId
-		? `${$nostrVpnIdentity.appPubkeyHex}:${networkId}:${pairedContextKey}`
-		: '';
-	$: if (mounted && currentAttachKey && currentAttachKey !== lastAttachKey && !attachInFlight) {
-		void attachNostrVpnPacketBackend(currentAttachKey);
-	}
-	$: if (mounted && paired && emulator && !networkId && bridgeState !== 'waiting-native-mesh-context' && !attachInFlight) {
-		packetBackend = null;
-		backendStatus = null;
-		bridgeError = '';
-		bridgeState = 'waiting-native-mesh-context';
-		bridgeSummary = 'Waiting for native mesh context';
-		publishDebugState();
-	}
-	$: if (mounted && !paired && bridgeState !== 'waiting-pairing') {
-		resetBridgeState();
-	}
-
-	function meshNetworkId(identity) {
-		const pairedDetail = identity?.paired || {};
-		return [
-			pairedDetail.meshNetworkId,
-			pairedDetail.mesh_network_id,
-			pairedDetail.networkId,
-			pairedDetail.network_id,
-		]
-			.map((value) => String(value || '').trim())
-			.find(Boolean) || '';
-	}
+	let fipsStatus = {
+		state: 'waiting-vm',
+		error: '',
+		lastPeerError: '',
+		ethernetPeers: 0,
+		webrtcPeers: 0,
+	};
+	let removeEmulatorListeners = [];
 
 	function messageFromError(error) {
 		return error instanceof Error ? error.message : String(error || 'Unknown error');
-	}
-
-	function isMissingNativeMeshContext(error) {
-		return /exit peer|mesh context|native mesh|compressed.*pubkey|packet bridge requires/i
-			.test(messageFromError(error));
-	}
-
-	function resetBridgeState() {
-		packetBackend = null;
-		startedWithPacketBackend = false;
-		lastAttachKey = '';
-		backendStatus = null;
-		lastTransportStatus = null;
-		bridgeError = '';
-		bridgeState = paired ? 'waiting-vm' : 'waiting-pairing';
-		bridgeSummary = paired ? 'Waiting for v86' : 'Pair with Nostr VPN';
-		publishDebugState();
 	}
 
 	function addEmulatorListener(instance, event, handler) {
@@ -94,75 +40,118 @@
 		return () => instance?.remove_listener?.(event, handler);
 	}
 
-	let removeEmulatorListeners = [];
-
 	function installEmulatorListeners(instance) {
+		const serialDecoder = new TextDecoder();
+		let serialText = '';
 		removeEmulatorListeners = [
 			addEmulatorListener(instance, 'emulator-loaded', () => {
 				vmState = 'loaded';
-				vmSummary = 'v86 loaded';
+				vmSummary = 'WebVM loaded';
 				publishDebugState();
 			}),
 			addEmulatorListener(instance, 'emulator-ready', () => {
 				vmState = 'ready';
-				vmSummary = 'v86 ready';
+				vmSummary = 'WebVM ready';
 				publishDebugState();
 			}),
 			addEmulatorListener(instance, 'emulator-started', () => {
 				vmState = 'running';
-				vmSummary = 'v86 running';
+				vmSummary = 'WebVM running';
 				publishDebugState();
 			}),
 			addEmulatorListener(instance, 'download-error', (event) => {
 				vmState = 'load-failed';
-				vmError = `Failed to load ${event?.file_name || 'v86 asset'}`;
+				vmError = `Failed to load ${event?.file_name || 'WebVM asset'}`;
 				vmSummary = vmError;
 				publishDebugState();
+			}),
+			addEmulatorListener(instance, 'serial0-output-byte', (byte) => {
+				const text = serialDecoder.decode(Uint8Array.of(byte & 0xff), { stream: true });
+				if (!text) return;
+				serialText += text;
+				if (serialText.length > SERIAL_BUFFER_LIMIT) {
+					serialText = serialText.slice(-SERIAL_BUFFER_LIMIT);
+				}
+				serialTerminal?.write(text);
 			}),
 		];
 	}
 
+	async function initializeSerialTerminal() {
+		const { Terminal } = await import('@xterm/xterm');
+		if (destroyed) return;
+		serialTerminal = new Terminal({
+			cols: 120,
+			rows: 32,
+			convertEol: true,
+			cursorBlink: true,
+			fontFamily: 'Menlo, Monaco, Consolas, monospace',
+			fontSize: 12,
+			letterSpacing: 0,
+			scrollback: 5_000,
+			theme: {
+				background: '#020617',
+				foreground: '#d1fae5',
+			},
+		});
+		serialTerminal.open(serialConsole);
+		serialInputDisposable = serialTerminal.onData((data) => emulator?.serial0_send?.(data));
+		publishDebugState();
+	}
+
 	function getTestHooks() {
-		return browser ? globalThis.irisWebvmV86TestHooks || null : null;
+		return localDiagnosticsEnabled() ? globalThis.irisWebvmV86TestHooks || null : null;
+	}
+
+	function localDiagnosticsEnabled() {
+		if (!browser) return false;
+		return ['127.0.0.1', 'localhost', '[::1]'].includes(globalThis.location.hostname);
 	}
 
 	async function createV86Instance(options) {
 		const hook = getTestHooks()?.createV86;
-		if (hook) {
-			return hook(options);
-		}
+		if (hook) return hook(options);
 		const { V86 } = await import('v86');
 		return new V86(options);
 	}
 
-	async function startFipsTransportWithPacketBackend(options) {
-		const hook = getTestHooks()?.startFipsTransport;
-		if (hook) {
-			return hook(options);
-		}
-		return startNostrVpnFipsTransport(options);
+	async function startFipsHost(instance) {
+		const hook = getTestHooks()?.createFipsHost;
+		const createHost = hook || createWebvmFipsHost;
+		fipsHost = await createHost({
+			emulator: instance,
+			onStatus(status) {
+				fipsStatus = status;
+				publishDebugState();
+			},
+		});
 	}
 
 	async function bootV86() {
 		vmState = 'loading';
-		vmSummary = 'Loading v86';
+		vmSummary = 'Loading WebVM';
 		vmError = '';
+		const rawSerialConsole = document.createElement('textarea');
 		const options = {
 			wasm_path: V86_WASM_URL,
-			memory_size: 128 * 1024 * 1024,
+			memory_size: 256 * 1024 * 1024,
 			vga_memory_size: 8 * 1024 * 1024,
 			autostart: true,
 			fastboot: true,
 			disable_speaker: true,
 			bios: { url: BIOS_URL },
 			vga_bios: { url: VGA_BIOS_URL },
-			bzimage: { url: BUILDROOT_KERNEL_URL },
-			cmdline: 'console=ttyS0 console=tty0 ip=dhcp loglevel=3',
+			bzimage_initrd_from_filesystem: true,
+			cmdline: 'rw root=host9p rootfstype=9p rootflags=trans=virtio,cache=loose modules=virtio_pci console=ttyS0 console=tty0 loglevel=3',
+			filesystem: {
+				baseurl: GUEST_ROOTFS_URL,
+				basefs: GUEST_FS_URL,
+			},
 			screen: {
 				container: screenContainer,
 				use_graphical_text: true,
 			},
-			serial_container: serialConsole,
+			serial_container: rawSerialConsole,
 			net_device: {
 				type: 'virtio',
 				id: 0,
@@ -179,174 +168,97 @@
 			emulator = instance;
 			installEmulatorListeners(instance);
 			vmState = 'created';
-			vmSummary = 'v86 initialized';
-			if (paired) {
-				bridgeState = 'waiting-backend';
-				bridgeSummary = 'Preparing VM packet backend';
-			}
+			vmSummary = 'WebVM initialized';
 			publishDebugState();
+			try {
+				await startFipsHost(instance);
+			} catch (error) {
+				fipsStatus = {
+					...fipsStatus,
+					state: 'failed',
+					error: messageFromError(error),
+				};
+				publishDebugState();
+			}
 		} catch (error) {
 			vmState = 'load-failed';
 			vmError = messageFromError(error);
-			vmSummary = vmError || 'v86 failed to load';
-			publishDebugState();
-		}
-	}
-
-	async function attachNostrVpnPacketBackend(nextAttachKey) {
-		lastAttachKey = nextAttachKey;
-		attachInFlight = true;
-		bridgeError = '';
-		const identity = get(nostrVpnIdentity);
-		const currentNetworkId = meshNetworkId(identity);
-
-		try {
-			if (!emulator) {
-				bridgeState = 'waiting-vm';
-				bridgeSummary = 'Waiting for v86';
-				return;
-			}
-			if (!currentNetworkId) {
-				bridgeState = 'waiting-native-mesh-context';
-				bridgeSummary = 'Waiting for native mesh context';
-				return;
-			}
-
-			bridgeState = 'backend-attaching';
-			bridgeSummary = 'Preparing VM packet backend';
-			packetBackend = await createNostrVpnV86PacketBackend(emulator, {
-				networkId: currentNetworkId,
-				appPubkeyHex: identity.appPubkeyHex,
-			});
-			backendStatus = packetBackend.status?.() || null;
-			bridgeState = 'fips-starting';
-			bridgeSummary = 'Starting Nostr VPN packet bridge';
-			publishDebugState();
-
-			const transportStatus = await startFipsTransportWithPacketBackend({ packetBackend });
-			lastTransportStatus = transportStatus;
-			startedWithPacketBackend = Boolean(transportStatus?.packetBridgeAttached);
-			bridgeState = transportStatus?.packetBridgeAttached
-				? 'packet-bridge-ready'
-				: 'waiting-native-mesh-context';
-			bridgeSummary = transportStatus?.packetBridgeAttached
-				? 'Nostr VPN packet bridge ready'
-				: 'Waiting for native mesh context';
-		} catch (error) {
-			if (isMissingNativeMeshContext(error)) {
-				bridgeState = 'waiting-native-mesh-context';
-				bridgeSummary = 'Waiting for native mesh context';
-			} else {
-				bridgeState = 'fips-start-failed';
-				bridgeSummary = 'Nostr VPN packet bridge failed';
-			}
-			bridgeError = messageFromError(error);
-		} finally {
-			attachInFlight = false;
+			vmSummary = vmError || 'WebVM failed to load';
 			publishDebugState();
 		}
 	}
 
 	function publishDebugState() {
-		if (!browser) {
-			return;
-		}
+		if (!localDiagnosticsEnabled()) return;
 		globalThis.irisWebvmV86 = {
 			emulator,
-			packetBackend,
+			fipsHost,
+			serialTerminal,
 			state: () => ({
 				vmState,
 				vmSummary,
 				vmError,
-				bridgeState,
-				bridgeSummary,
-				bridgeError,
-				backendStatus,
-				lastTransportStatus,
+				fipsStatus,
 			}),
-			attachPacketBackend: () => attachNostrVpnPacketBackend(currentAttachKey),
 		};
 	}
 
 	onMount(() => {
-		mounted = true;
-		resetBridgeState();
-		void bootV86();
+		publishDebugState();
+		void initializeSerialTerminal().then(() => bootV86());
 	});
 
 	onDestroy(() => {
 		destroyed = true;
-		for (const removeListener of removeEmulatorListeners) {
-			removeListener?.();
-		}
+		for (const removeListener of removeEmulatorListeners) removeListener?.();
 		removeEmulatorListeners = [];
-		if (startedWithPacketBackend) {
-			void stopNostrVpnFipsTransport().catch(() => {});
-		}
+		serialInputDisposable?.dispose?.();
+		serialInputDisposable = null;
+		serialTerminal?.dispose?.();
+		serialTerminal = null;
+		void fipsHost?.stop?.();
 		void emulator?.destroy?.();
-		if (browser) {
-			delete globalThis.irisWebvmV86;
-		}
+		if (localDiagnosticsEnabled()) delete globalThis.irisWebvmV86;
 	});
 </script>
 
 <svelte:head>
-	<title>v86 Nostr VPN WebVM</title>
+	<title>Iris WebVM</title>
 </svelte:head>
 
-<main data-testid="v86-route" class="min-h-screen bg-neutral-950 text-gray-100">
-	<div class="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-		<section class="flex min-h-[70vh] flex-col overflow-hidden rounded-md border border-neutral-800 bg-neutral-900">
-			<div class="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3">
-				<div>
-					<h1 class="text-base font-semibold">v86 WebVM</h1>
-					<div data-testid="v86-status" class="mt-1 text-xs text-gray-300">{vmSummary}</div>
-				</div>
-				<div
-					data-testid="v86-nvpn-state"
-					class="rounded bg-neutral-800 px-3 py-1 text-xs text-emerald-200"
-					class:text-amber-200={bridgeState === 'waiting-native-mesh-context' || bridgeState === 'waiting-pairing'}
-					class:text-red-200={bridgeState === 'fips-start-failed'}
-				>
-					{bridgeSummary}
-				</div>
+<main data-testid="v86-route" class="min-h-screen bg-neutral-950 px-3 py-3 text-gray-100 sm:px-5 sm:py-5">
+	<section class="mx-auto flex min-h-[calc(100vh-1.5rem)] max-w-[100rem] flex-col overflow-hidden rounded-md border border-neutral-800 bg-black sm:min-h-[calc(100vh-2.5rem)]">
+		<header class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-3">
+			<div>
+				<h1 class="text-base font-semibold">Iris WebVM</h1>
+				<div data-testid="v86-status" class="mt-1 text-xs text-gray-400">{vmSummary}</div>
 			</div>
-
-			<div
-				bind:this={screenContainer}
-				data-testid="v86-screen"
-				class="v86-screen min-h-[28rem] flex-1 bg-black"
-			></div>
-
-			<textarea
-				bind:this={serialConsole}
-				data-testid="v86-serial"
-				class="h-28 w-full resize-none border-t border-neutral-800 bg-neutral-950 p-3 font-mono text-xs text-emerald-100 outline-none"
-				readonly
-				aria-label="v86 serial console"
-			></textarea>
-		</section>
-
-		<aside class="space-y-4">
-			<section class="rounded-md border border-neutral-800 bg-neutral-900 p-4">
-				<NostrVpnTab />
-			</section>
-
-			<section class="rounded-md border border-neutral-800 bg-neutral-900 p-4 text-sm">
-				<h2 class="mb-3 text-base font-semibold">Packet transport</h2>
-				<div data-testid="v86-backend-status" class="space-y-2 text-xs text-gray-300">
-					<div>{bridgeSummary}</div>
-					{#if backendStatus}
-						<div>Guest IP {backendStatus.guestIp}</div>
-					{/if}
-					{#if bridgeError}
-						<div class="break-words text-amber-200">{bridgeError}</div>
-					{/if}
-					<div class="break-words text-gray-400">{$nostrVpnTransportStatus.summary}</div>
+			<div class="text-right text-xs">
+				<div data-testid="v86-fips-state" class:text-emerald-300={fipsStatus.state === 'ready'} class:text-red-300={fipsStatus.state === 'failed' || fipsStatus.state === 'error'}>
+					{fipsStatus.state === 'ready' ? 'FIPS connected' : `FIPS ${fipsStatus.state}`}
 				</div>
-			</section>
-		</aside>
-	</div>
+				{#if fipsStatus.ethernetPeers || fipsStatus.webrtcPeers}
+					<div class="mt-1 text-gray-500">Ethernet {fipsStatus.ethernetPeers} · WebRTC {fipsStatus.webrtcPeers}</div>
+				{/if}
+			</div>
+		</header>
+
+		{#if vmError || fipsStatus.error}
+			<div data-testid="v86-error" class="border-b border-red-950 bg-red-950/40 px-4 py-2 text-xs text-red-200">
+				{vmError || fipsStatus.error}
+			</div>
+		{/if}
+
+		<div bind:this={screenContainer} data-testid="v86-screen" class="v86-screen min-h-[32rem] flex-1 bg-black"></div>
+
+		<div
+			bind:this={serialConsole}
+			data-testid="v86-serial"
+			class="h-48 w-full border-t border-neutral-800 bg-neutral-950 p-2"
+			role="application"
+			aria-label="WebVM serial console"
+		></div>
+	</section>
 </main>
 
 <style>

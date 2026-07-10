@@ -6,6 +6,5 @@
 	<li><a class="underline" target="_blank" href="https://cheerpx.io/">CheerpX</a>: x86 JIT in Wasm</li>
 	<li><a class="underline" target="_blank" href="https://xtermjs.org/">Xterm.js</a>: interactive terminal</li>
 	<li>Local/private <a class="underline" target="_blank" href="https://cheerpx.io/docs/guides/File-System-support">file storage</a></li>
-	<li>Nostr VPN QR pairing panel for native app approval</li>
 </ul>
 <slot></slot>

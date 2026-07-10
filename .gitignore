@@ -2,6 +2,8 @@
 /.svelte-kit
 pnpm-lock.yaml
 build/
+playwright-report/
+test-results/
 custom-disk-images/*
 !custom-disk-images/.gitkeep
 nginx_access.log

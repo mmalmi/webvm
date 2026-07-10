@@ -1,0 +1,50 @@
+[server]
+bind_address = "127.0.0.1:80"
+stun_port = 0
+enable_webrtc = false
+enable_fips = true
+fips_discovery_scope = "fips-overlay-v1"
+fips_relays = []
+fips_peers = []
+enable_fips_udp = false
+fips_udp_public = false
+enable_fips_webrtc = false
+fips_ethernet_interfaces = ["htree0"]
+fetch_from_fips_peers = true
+public_plaintext_reads = true
+http_webrtc_fetch = false
+peer_signal_urls = []
+enable_multicast = false
+max_multicast_peers = 0
+enable_wifi_aware = false
+max_wifi_aware_peers = 0
+enable_bluetooth = false
+max_bluetooth_peers = 0
+
+[storage]
+data_dir = "/var/lib/hashtree/data"
+max_size_gb = 1
+
+[nostr]
+enabled = false
+event_transport = "fips-local-only"
+relays = []
+bootstrap_follows = []
+db_max_size_gb = 1
+spambox_max_size_gb = 0
+
+[blossom]
+enabled = false
+servers = []
+read_servers = []
+write_servers = []
+replicate_servers = []
+
+[sync]
+enabled = false
+sync_own = false
+sync_followed = false
+
+[updater]
+auto_check = false
+auto_install = false

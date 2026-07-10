@@ -19,11 +19,14 @@ export default defineConfig({
 				{ src: 'tower.ico', dest: '' },
 				{ src: 'scrollbar.css', dest: '' },
 				{ src: 'serviceWorker.js', dest: '' },
-				{ src: 'login.html', dest: '' },
 				{ src: 'assets/', dest: '' },
 				{ src: 'documents/', dest: '' },
+				{ src: 'custom-disk-images/v86-guest/seabios.bin', dest: 'v86' },
+				{ src: 'custom-disk-images/v86-guest/vgabios.bin', dest: 'v86' },
 				{ src: 'node_modules/v86/build/v86.wasm', dest: 'v86' },
-				{ src: 'node_modules/v86/build/v86-fallback.wasm', dest: 'v86' }
+				{ src: 'node_modules/v86/build/v86-fallback.wasm', dest: 'v86' },
+				{ src: 'custom-disk-images/v86-guest/fs.json', dest: 'v86/guest' },
+				{ src: 'custom-disk-images/v86-guest/rootfs', dest: 'v86/guest' }
 			]
 		})
 	]

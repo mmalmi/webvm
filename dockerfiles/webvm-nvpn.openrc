@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+
+description="WebVM guest Nostr VPN over FIPS Ethernet"
+command="/usr/local/sbin/webvm-nvpn"
+command_background="yes"
+pidfile="/run/webvm/nvpn.pid"
+output_log="/var/log/webvm-nvpn.log"
+error_log="/var/log/webvm-nvpn.log"
+
+depend() {
+    need webvm-underlay
+}
+
+start_pre() {
+    checkpath --directory --mode 0755 /run/webvm
+    checkpath --directory --mode 0700 /var/lib/nvpn
+    checkpath --file --mode 0600 /var/log/webvm-nvpn.log
+}
