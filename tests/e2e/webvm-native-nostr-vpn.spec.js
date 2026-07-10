@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +41,39 @@ function requireRealFile(envName, { executable = false } = {}) {
 	return resolved;
 }
 
+function readHostPeerDiagnostics(nvpnBin, configPath, participantPubkey) {
+	const result = spawnSync(nvpnBin, ['status', '--config', configPath, '--json'], {
+		encoding: 'utf8',
+		timeout: 15_000,
+	});
+	if (result.status !== 0) {
+		return { error: `status-exit-${result.status ?? 'unknown'}` };
+	}
+	try {
+		const status = JSON.parse(result.stdout);
+		const peer = status?.daemon?.state?.peers?.find(
+			(candidate) => candidate.participant_pubkey === participantPubkey,
+		);
+		return {
+			fipsCoreVersion: status?.daemon?.state?.fips_core_version || '',
+			effectiveAdvertisedRoutes: status?.effective_advertised_routes || [],
+			peer: peer ? {
+				reachable: peer.reachable,
+				error: peer.error,
+				fipsBytesRecv: peer.fips_bytes_recv,
+				fipsBytesSent: peer.fips_bytes_sent,
+				fipsPacketsRecv: peer.fips_packets_recv,
+				fipsPacketsSent: peer.fips_packets_sent,
+				fipsCurrentKBit: peer.fips_current_k_bit,
+				fipsTransportType: peer.fips_transport_type,
+				lastFipsDataSeenAt: peer.last_fips_data_seen_at,
+			} : null,
+		};
+	} catch {
+		return { error: 'status-json-invalid' };
+	}
+}
+
 function expectCompactBootstrap(joinRequest) {
 	expect(joinRequest.length).toBeLessThanOrEqual(384);
 	const encoded = joinRequest.slice('nvpn://join-request/'.length);
@@ -74,13 +107,57 @@ async function decodeQrScreenshot(screenshot) {
 			formats: ['QRCode'],
 			tryHarder: true,
 			tryDenoise: true,
-			tryDownscale: false,
+			tryDownscale: true,
+			downscaleFactor: 2,
 			binarizer,
 		});
 		const decoded = results.find((result) => result.format === 'QRCode' && result.text);
 		if (decoded) return decoded.text;
 	}
 	throw new Error('rendered terminal QR could not be decoded from pixels');
+}
+
+async function normalizeRenderedQrScreenshot(page, screenshot, verticalScale) {
+	const encoded = screenshot.toString('base64');
+	const normalized = await page.evaluate(async ({ encodedPng, scaleY }) => {
+		const image = new Image();
+		image.src = `data:image/png;base64,${encodedPng}`;
+		await new Promise((resolve, reject) => {
+			image.onload = resolve;
+			image.onerror = () => reject(new Error('failed to decode terminal QR screenshot'));
+		});
+		const border = 32;
+		const canvas = document.createElement('canvas');
+		canvas.width = image.width + border * 2;
+		canvas.height = Math.round(image.height * scaleY) + border * 2;
+		const context = canvas.getContext('2d', { willReadFrequently: true });
+		context.fillStyle = '#fff';
+		context.fillRect(0, 0, canvas.width, canvas.height);
+		context.imageSmoothingEnabled = false;
+		context.drawImage(
+			image,
+			border,
+			border,
+			image.width,
+			canvas.height - border * 2,
+		);
+		const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+		for (let offset = 0; offset < pixels.data.length; offset += 4) {
+			const luminance = (
+				pixels.data[offset] * 299 +
+				pixels.data[offset + 1] * 587 +
+				pixels.data[offset + 2] * 114
+			) / 1000;
+			const value = luminance >= 128 ? 0 : 255;
+			pixels.data[offset] = value;
+			pixels.data[offset + 1] = value;
+			pixels.data[offset + 2] = value;
+			pixels.data[offset + 3] = 255;
+		}
+		context.putImageData(pixels, 0, 0);
+		return canvas.toDataURL('image/png').slice('data:image/png;base64,'.length);
+	}, { encodedPng: encoded, scaleY: verticalScale });
+	return Buffer.from(normalized, 'base64');
 }
 
 function defaultNativeHelperManifest() {
@@ -396,12 +473,56 @@ async function captureRenderedPairingQr(page) {
 			{ timeoutMs: 120_000, message: 'terminal QR did not finish rendering' },
 		);
 		await page.waitForTimeout(250);
-		const terminal = page.getByTestId('v86-serial');
-		const screenshot = await terminal.screenshot({
+		const qrGeometry = await page.evaluate(() => {
+			const terminal = globalThis.irisWebvmV86?.serialTerminal;
+			const buffer = terminal?.buffer?.active;
+			const screen = document.querySelector('[data-testid="v86-serial"] .xterm-screen');
+			if (!terminal || !buffer || !screen) return null;
+			let firstRow = Number.POSITIVE_INFINITY;
+			let lastRow = -1;
+			let firstColumn = Number.POSITIVE_INFINITY;
+			let lastColumn = -1;
+			const viewportEnd = Math.min(buffer.length, buffer.viewportY + terminal.rows);
+			for (let row = buffer.viewportY; row < viewportEnd; row += 1) {
+				const line = buffer.getLine(row)?.translateToString(true) || '';
+				for (let column = 0; column < line.length; column += 1) {
+					if (!/[▀▄█]/u.test(line[column])) continue;
+					firstRow = Math.min(firstRow, row);
+					lastRow = Math.max(lastRow, row);
+					firstColumn = Math.min(firstColumn, column);
+					lastColumn = Math.max(lastColumn, column);
+				}
+			}
+			if (lastRow < 0 || lastColumn < 0) return null;
+			const bounds = screen.getBoundingClientRect();
+			const cellWidth = bounds.width / terminal.cols;
+			const cellHeight = bounds.height / terminal.rows;
+			const left = Math.max(0, firstColumn - 4);
+			const right = Math.min(terminal.cols, lastColumn + 5);
+			const top = Math.max(0, firstRow - buffer.viewportY - 2);
+			const bottom = Math.min(terminal.rows, lastRow - buffer.viewportY + 3);
+			return {
+				clip: {
+					x: bounds.x + left * cellWidth,
+					y: bounds.y + top * cellHeight,
+					width: (right - left) * cellWidth,
+					height: (bottom - top) * cellHeight,
+				},
+				verticalScale: (2 * cellWidth) / cellHeight,
+			};
+		});
+		if (!qrGeometry) throw new Error('rendered terminal QR glyph bounds are unavailable');
+		const screenshot = await page.screenshot({
 			animations: 'disabled',
+			clip: qrGeometry.clip,
 		});
 		try {
-			return await decodeQrScreenshot(screenshot);
+			const normalized = await normalizeRenderedQrScreenshot(
+				page,
+				screenshot,
+				qrGeometry.verticalScale,
+			);
+			return await decodeQrScreenshot(normalized);
 		} catch (error) {
 			const diagnostics = await page.evaluate((screenshotBytes) => {
 				const terminal = globalThis.irisWebvmV86?.serialTerminal;
@@ -409,16 +530,9 @@ async function captureRenderedPairingQr(page) {
 				let occupiedRows = 0;
 				let maxColumns = 0;
 				let blockGlyphs = 0;
-				const sanitizedLines = [];
 				for (let row = 0; row < (buffer?.length || 0); row += 1) {
 					const line = buffer.getLine(row)?.translateToString(true) || '';
-					if (line.length > 0) {
-						occupiedRows += 1;
-						sanitizedLines.push(line
-							.replace(/nvpn:\/\/[^\s]+/gu, '[redacted-uri]')
-							.replace(/npub1[023456789acdefghjklmnpqrstuvwxyz]+/gu, 'npub1[redacted]')
-							.replace(/[0-9a-f]{64}/giu, '[redacted-key]'));
-					}
+					if (line.length > 0) occupiedRows += 1;
 					maxColumns = Math.max(maxColumns, line.length);
 					blockGlyphs += (line.match(/[▀▄█]/gu) || []).length;
 				}
@@ -435,7 +549,6 @@ async function captureRenderedPairingQr(page) {
 					rows: terminal?.rows || 0,
 					cols: terminal?.cols || 0,
 					canvases,
-					sanitizedLines,
 				};
 			}, screenshot.length);
 			throw new Error(`${error.message}: ${JSON.stringify(diagnostics)}`);
@@ -618,9 +731,12 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 	const nvpnBin = requireRealFile(NVPN_BIN_ENV, { executable: true });
 	let native;
 	let joinRequest = '';
+	let guestParticipantPubkey = '';
 	let testFailure = null;
 
 	try {
+		native = startNativeHelper({ configPath, nvpnBin });
+		await native.waitForStatus('ready', 120_000);
 		await page.goto('/v86');
 		await attachRealV86Serial(page);
 		try {
@@ -677,14 +793,24 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 		);
 		expect(prePair).toContain('PREPAIR:absent:absent:absent:blocked:blocked');
 
+		if (process.env.NVPN_WEBVM_GUEST_DEBUG === '1') {
+			const debugRestart = await runSerialCommand(
+				page,
+				'guest debug restart',
+				"mkdir -p /etc/conf.d; printf '%s\\n' 'export RUST_LOG=fips_core::node::handlers::rx_loop::dataplane=debug,fips_core::node::handlers::session=debug' 'export NVPN_FIPS_PACKET_DEBUG=1' > /etc/conf.d/webvm-nvpn; : > /var/log/webvm-nvpn.log; rc-service webvm-nvpn restart >/dev/null; for attempt in $(seq 1 60); do [ -s /run/webvm/pairing-uri ] && break; sleep 1; done; if [ -s /run/webvm/pairing-uri ]; then printf 'GUEST_DEBUG_READY\\n'; else printf 'GUEST_DEBUG_FAILED\\n'; fi",
+				90_000,
+			);
+			expect(debugRestart).toContain('GUEST_DEBUG_READY');
+		}
+
 		joinRequest = await captureRenderedPairingQr(page);
 		if (!joinRequest.startsWith('nvpn://join-request/') || joinRequest.includes(' ')) {
 			throw new Error('decoded terminal QR is not one canonical join bootstrap');
 		}
-		expectCompactBootstrap(joinRequest);
+		const bootstrap = expectCompactBootstrap(joinRequest);
+		guestParticipantPubkey = nip19.decode(bootstrap.deviceAppKeyNpub).data;
 		await waitForGuestApprovalSubscription(page);
 
-		native = startNativeHelper({ configPath, nvpnBin });
 		const imported = await native.importJoinRequest(joinRequest);
 		joinRequest = '';
 		expect(imported.participantAdded).toBe(true);
@@ -700,11 +826,12 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 		const httpsResult = await runSerialCommand(
 			page,
 			'external HTTPS request',
-			"result_file=/run/webvm/e2e-ipify; rm -f \"$result_file\"; dns_ip=; for attempt in $(seq 1 10); do dns_ip=$(dig +time=5 +tries=1 +short A api4.ipify.org @127.0.0.1 2>/dev/null | awk '/^([0-9]{1,3}\\.){3}[0-9]{1,3}$/ { print; exit }'); [ -n \"$dns_ip\" ] && break; sleep 1; done; if [ -n \"$dns_ip\" ]; then dns=ok; else dns=failed; fi; if ip route get 1.1.1 2>/dev/null | grep -Eq '(^|[[:space:]])dev[[:space:]]+nvpn0([[:space:]]|$)'; then route=ok; else route=failed; fi; if [ \"$dns\" = ok ] && [ \"$route\" = ok ] && curl --proto '=https' --tlsv1.2 --resolve \"api4.ipify.org:443:$dns_ip\" -fsS --connect-timeout 15 --max-time 45 -o \"$result_file\" https://api4.ipify.org 2>/dev/null && grep -Eq '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' \"$result_file\"; then printf 'HTTPS_OK:%s\\n' \"$(cat \"$result_file\")\"; else printf 'HTTPS_FAILED dns=%s route=%s\\n' \"$dns\" \"$route\"; printf '%s\\n' '--- ROUTE ---'; ip route get 1.1.1 2>&1 || true; printf '%s\\n' '--- NVPN0 ---'; ip -s link show nvpn0 2>&1 || true; printf '%s\\n' '--- RESOLVER ---'; sed -n '1,20p' /etc/resolv.conf 2>&1 || true; printf '%s\\n' '--- REDACTED NVPN LOG ---'; tail -160 /var/log/webvm-nvpn.log 2>/dev/null | sed -E 's#nvpn://[^[:space:]]+#[redacted]#g; s#npub1[a-z0-9]+#npub1[redacted]#g; s#[0-9a-fA-F]{64}#[redacted]#g' || true; fi; rm -f \"$result_file\"",
+			"result_file=/run/webvm/e2e-ipify; rm -f \"$result_file\"; dns_ip=; for attempt in $(seq 1 10); do dns_ip=$(dig +time=5 +tries=1 +short A api4.ipify.org @127.0.0.1 2>/dev/null | awk '/^([0-9]{1,3}\\.){3}[0-9]{1,3}$/ { print; exit }'); [ -n \"$dns_ip\" ] && break; sleep 1; done; if [ -n \"$dns_ip\" ]; then dns=ok; else dns=failed; fi; if ip route get 1.1.1 2>/dev/null | grep -Eq '(^|[[:space:]])dev[[:space:]]+nvpn0([[:space:]]|$)'; then route=ok; else route=failed; fi; if [ \"$dns\" = ok ] && [ \"$route\" = ok ] && curl --proto '=https' --tlsv1.2 --resolve \"api4.ipify.org:443:$dns_ip\" -fsS --connect-timeout 15 --max-time 45 -o \"$result_file\" https://api4.ipify.org 2>/dev/null && grep -Eq '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' \"$result_file\"; then printf 'HTTPS_OK:%s\\n' \"$(cat \"$result_file\")\"; else printf 'HTTPS_FAILED dns=%s route=%s\\n' \"$dns\" \"$route\"; printf '%s\\n' '--- ROUTE ---'; ip route get 1.1.1 2>&1 || true; printf '%s\\n' '--- NVPN0 ---'; ip -s link show nvpn0 2>&1 || true; printf '%s\\n' '--- FIPS TUN ---'; ip -s link show nvpnfips0 2>&1 || true; printf '%s\\n' '--- NET DEV ---'; cat /proc/net/dev 2>&1 || true; printf '%s\\n' '--- NVPN STATUS ---'; nvpn status --config /var/lib/nvpn/config.toml --json 2>&1 | sed -E 's#nvpn://[^[:space:]\"]+#[redacted]#g; s#npub1[a-z0-9]+#npub1[redacted]#g' || true; printf '%s\\n' '--- RESOLVER ---'; sed -n '1,20p' /etc/resolv.conf 2>&1 || true; printf '%s\\n' '--- REDACTED NVPN LOG ---'; sed -E 's#nvpn://[^[:space:]]+#[redacted]#g; s#npub1[a-z0-9]+#npub1[redacted]#g; s#[0-9a-fA-F]{64}#[redacted]#g' /var/log/webvm-nvpn.log 2>/dev/null | grep -E 'fips: (TUN packet|mesh -> TUN|failed)|dataplane (raw ingress dropped|packet dropped)|Session established|Dispatching dataplane authenticated session|approval applied' | tail -300 || true; fi; rm -f \"$result_file\"",
 			120_000,
 			);
 			const httpsOk = httpsResult.find((line) => line.startsWith('HTTPS_OK:'));
 			if (!httpsOk) {
+				const host = readHostPeerDiagnostics(nvpnBin, configPath, guestParticipantPubkey);
 				const browser = await page.evaluate(() => {
 					const state = globalThis.irisWebvmV86?.state?.() || null;
 					const status = state?.fipsStatus || null;
@@ -715,11 +842,14 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 						ethernetPeers: status.ethernetPeers,
 						webrtcPeers: status.webrtcPeers,
 						fipsErrors: globalThis.__nvpnWebvmRealE2eSerial?.fipsErrors || [],
+						guestFmpMsg1ByMac: {
+							...(globalThis.irisWebvmV86?.fipsHost?.ethernetFrameStats?.guestFmpMsg1ByMac || {}),
+						},
 						ethernet: globalThis.__nvpnWebvmRealE2eSerial?.ethernet || null,
 					} : null;
 				});
 				throw new Error(
-					`guest public HTTPS exit failed: ${JSON.stringify({ httpsResult, browser })}`,
+					`guest public HTTPS exit failed: ${JSON.stringify({ httpsResult, browser, host })}`,
 				);
 			}
 			expect(httpsOk).toMatch(/^HTTPS_OK:([0-9]{1,3}\.){3}[0-9]{1,3}$/);

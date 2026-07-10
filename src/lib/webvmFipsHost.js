@@ -26,6 +26,8 @@ export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([
 	'stun:stun.cloudflare.com:3478',
 ]);
 
+export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
+
 function loadSecretKey() {
 	if (!globalThis.crypto?.getRandomValues) {
 		throw new Error('Secure browser randomness is unavailable');
@@ -58,6 +60,7 @@ export async function createWebvmFipsHost({
 	const ethernet = new VirtualEthernetTransport({
 		port: framePort,
 		localMac: macForIdentity(identity),
+		mtu: WEBVM_FIPS_UNDERLAY_MTU,
 		discovery: false,
 		announce: true,
 		discoveryScope: discoveryApp,
@@ -68,11 +71,12 @@ export async function createWebvmFipsHost({
 		relayClients: sharedRelayClients,
 		stunServers,
 		discoveryApp,
-		// The browser discovers and dials native adverts on demand. It does not
-		// advertise itself, which keeps one owner for the WebRTC offer.
+		// The browser dials native adverts but does not advertise itself, which
+		// keeps one owner for each WebRTC offer while providing guest transit.
 		advertiseOnNostr: false,
-		autoConnect: false,
+		autoConnect: true,
 		acceptConnections: true,
+		mtu: WEBVM_FIPS_UNDERLAY_MTU,
 		logger,
 	});
 	const node = new FipsNode({
