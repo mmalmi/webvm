@@ -567,7 +567,7 @@ async function captureRenderedPairingQr(page) {
 	}
 }
 
-async function waitForGuestApprovalSubscription(page) {
+async function waitForGuestApprovalSubscription(page, publishBaseline = 0) {
 	try {
 		await waitUntil(
 			() => page.evaluate(() => {
@@ -598,7 +598,7 @@ async function waitForGuestApprovalSubscription(page) {
 	if (!stats || stats.subscriptionBatches < 1 || stats.serviceErrors > 0) {
 		throw new Error(`browser pubsub rejected guest approval subscription: ${JSON.stringify(stats)}`);
 	}
-	if (stats.publishBatches !== 0) {
+	if (stats.publishBatches !== publishBaseline) {
 		throw new Error(`guest published a forbidden join request event: ${JSON.stringify(stats)}`);
 	}
 }
@@ -765,27 +765,46 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 			"for attempt in $(seq 1 60); do if ss -ltn | grep -Eq '127\\.0\\.0\\.1:80[[:space:]]'; then break; fi; sleep 1; done; smoke_dir=/run/webvm/e2e-htree; rm -rf \"$smoke_dir\"; mkdir -p \"$smoke_dir\"; printf 'webvm-hashtree-e2e' >\"$smoke_dir/index.html\"; if [ \"${HTREE_LOCAL_DAEMON_ONLY:-}\" = 1 ] && command -v git-remote-htree >/dev/null && ss -ltn | grep -Eq '127\\.0\\.0\\.1:80[[:space:]]'; then add_output=$(htree add \"$smoke_dir\" --unencrypted --local 2>/dev/null) || add_output=; nhash=$(printf '%s\\n' \"$add_output\" | awk '/^  url:/ { print $2; exit }'); case \"$nhash\" in nhash1*) if [ \"$(curl --noproxy '*' -H 'Accept: text/html' -fsS --connect-timeout 5 --max-time 15 \"http://${nhash}.iris.localhost/\" 2>/dev/null)\" = 'webvm-hashtree-e2e' ]; then smoke=ok; else smoke=failed; fi ;; *) smoke=failed ;; esac; else smoke=failed; fi; rm -rf \"$smoke_dir\"; if [ \"$smoke\" = ok ]; then printf 'HASHTREE_LOCAL_OK\\n'; else printf 'HASHTREE_LOCAL_FAILED\\n'; fi",
 			90_000,
 		);
-			expect(hashtreeSmoke).toContain('HASHTREE_LOCAL_OK');
+		expect(hashtreeSmoke).toContain('HASHTREE_LOCAL_OK');
 
-			const browserFipsNpub = await page.evaluate(() => {
-				const publicKeyHex = globalThis.irisWebvmV86?.state?.().fipsStatus?.publicKeyHex;
-				if (!/^(02|03)[0-9a-f]{64}$/i.test(publicKeyHex || '')) {
-					throw new Error('browser FIPS identity is unavailable');
-				}
-				return publicKeyHex.slice(2);
-			}).then((xOnlyHex) => nip19.npubEncode(xOnlyHex));
-			const prePairDns = await runSerialCommand(
-				page,
-				'pre-pair private DNS and public refusal',
-				`iris=$(dig +time=2 +tries=1 +short A nhash1webvme2e.iris.localhost @127.0.0.1 2>/dev/null | head -1); fips=$(dig +time=5 +tries=1 +short AAAA ${browserFipsNpub}.fips @127.0.0.1 2>/dev/null | head -1); public_status=$(dig +time=2 +tries=1 A api.ipify.org @127.0.0.1 2>/dev/null | sed -n 's/.*status: \\([A-Z]*\\),.*/\\1/p' | head -1); printf 'PREPAIR_DNS:iris=%s:fips=%s:public=%s\\n' \"$iris\" \"$fips\" \"$public_status\"`,
-				30_000,
-			);
-			const prePairDnsLine = prePairDns.find((line) => line.startsWith('PREPAIR_DNS:')) || '';
-			expect(prePairDnsLine).toContain('iris=127.0.0.1');
-			expect(prePairDnsLine).toMatch(/:fips=fd[0-9a-f:]+:/i);
-			expect(prePairDnsLine).toContain('public=REFUSED');
+		const hashtreePublishBaseline = await page.evaluate(
+			() => globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats?.publishBatches || 0,
+		);
+		const gitRemoteSmoke = await runSerialCommand(
+			page,
+			'pre-pair git-remote-htree push and clone',
+			"repo=/run/webvm/e2e-git; clone=/run/webvm/e2e-git-clone; rm -rf \"$repo\" \"$clone\"; mkdir -p \"$repo\"; git -C \"$repo\" init -b main >/dev/null; git -C \"$repo\" config user.name 'WebVM E2E'; git -C \"$repo\" config user.email webvm-e2e@iris.localhost; printf 'git-remote-htree-e2e' >\"$repo/proof.txt\"; git -C \"$repo\" add proof.txt; git -C \"$repo\" commit -m initial >/dev/null; git -C \"$repo\" remote add htree htree://self/webvm-e2e; push_output=$(git -C \"$repo\" push --force htree main 2>&1); push_rc=$?; clone_output=; clone_rc=1; if [ $push_rc -eq 0 ]; then clone_output=$(git clone htree://self/webvm-e2e \"$clone\" 2>&1); clone_rc=$?; fi; if [ $push_rc -eq 0 ] && [ $clone_rc -eq 0 ] && [ \"$(cat \"$clone/proof.txt\" 2>/dev/null)\" = git-remote-htree-e2e ]; then printf 'GIT_REMOTE_HTREE_OK\\n'; else printf 'GIT_REMOTE_HTREE_FAILED:push=%s:clone=%s\\n' \"$push_rc\" \"$clone_rc\"; printf '%s\\n%s\\n' \"$push_output\" \"$clone_output\" | tail -20; fi; rm -rf \"$repo\" \"$clone\"",
+			120_000,
+		);
+		if (!gitRemoteSmoke.includes('GIT_REMOTE_HTREE_OK')) {
+			throw new Error(`git-remote-htree guest smoke failed: ${JSON.stringify(gitRemoteSmoke)}`);
+		}
+		await expect.poll(
+			() => page.evaluate(
+				() => globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats?.publishBatches || 0,
+			),
+			{ timeout: 30_000, message: 'Hashtree mutable root did not use browser pubsub' },
+		).toBeGreaterThan(hashtreePublishBaseline);
 
-			const prePair = await runSerialCommand(
+		const browserFipsNpub = await page.evaluate(() => {
+			const publicKeyHex = globalThis.irisWebvmV86?.state?.().fipsStatus?.publicKeyHex;
+			if (!/^(02|03)[0-9a-f]{64}$/i.test(publicKeyHex || '')) {
+				throw new Error('browser FIPS identity is unavailable');
+			}
+			return publicKeyHex.slice(2);
+		}).then((xOnlyHex) => nip19.npubEncode(xOnlyHex));
+		const prePairDns = await runSerialCommand(
+			page,
+			'pre-pair private DNS and public refusal',
+			`iris=$(dig +time=2 +tries=1 +short A nhash1webvme2e.iris.localhost @127.0.0.1 2>/dev/null | head -1); fips=$(dig +time=5 +tries=1 +short AAAA ${browserFipsNpub}.fips @127.0.0.1 2>/dev/null | head -1); public_status=$(dig +time=2 +tries=1 A api.ipify.org @127.0.0.1 2>/dev/null | sed -n 's/.*status: \\([A-Z]*\\),.*/\\1/p' | head -1); printf 'PREPAIR_DNS:iris=%s:fips=%s:public=%s\\n' \"$iris\" \"$fips\" \"$public_status\"`,
+			30_000,
+		);
+		const prePairDnsLine = prePairDns.find((line) => line.startsWith('PREPAIR_DNS:')) || '';
+		expect(prePairDnsLine).toContain('iris=127.0.0.1');
+		expect(prePairDnsLine).toMatch(/:fips=fd[0-9a-f:]+:/i);
+		expect(prePairDnsLine).toContain('public=REFUSED');
+
+		const prePair = await runSerialCommand(
 			page,
 			'pre-pair internet isolation',
 			"if ip -o address show dev eth0 scope global | grep -q .; then eth_l3=present; else eth_l3=absent; fi; if ip route show table all | grep -Eq '^[[:space:]]*default([[:space:]]|$)'; then v4_default=present; else v4_default=absent; fi; if ip -6 route show table all | grep -Eq '^[[:space:]]*default([[:space:]]|$)'; then v6_default=present; else v6_default=absent; fi; if ip route get 1.1.1 >/dev/null 2>&1; then raw_ip=reachable; else raw_ip=blocked; fi; if dig +time=2 +tries=1 A api4.ipify.org @1.1.1 >/dev/null 2>&1; then direct_dns=reachable; else direct_dns=blocked; fi; printf 'PREPAIR:%s:%s:%s:%s:%s\\n' \"$eth_l3\" \"$v4_default\" \"$v6_default\" \"$raw_ip\" \"$direct_dns\"",
@@ -809,7 +828,10 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 		}
 		const bootstrap = expectCompactBootstrap(joinRequest);
 		guestParticipantPubkey = nip19.decode(bootstrap.deviceAppKeyNpub).data;
-		await waitForGuestApprovalSubscription(page);
+		const approvalPublishBaseline = await page.evaluate(
+			() => globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats?.publishBatches || 0,
+		);
+		await waitForGuestApprovalSubscription(page, approvalPublishBaseline);
 
 		const imported = await native.importJoinRequest(joinRequest);
 		joinRequest = '';
