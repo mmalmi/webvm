@@ -785,6 +785,12 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 			),
 			{ timeout: 30_000, message: 'Hashtree mutable root did not use browser pubsub' },
 		).toBeGreaterThan(hashtreePublishBaseline);
+		const hashtreeRelayIsolation = await runSerialCommand(
+			page,
+			'Hashtree relay isolation',
+			"if grep -Eq 'wss?://' /var/log/webvm-hashtree.log 2>/dev/null; then printf 'HASHTREE_RELAY_ISOLATION_FAILED\\n'; grep -E 'wss?://' /var/log/webvm-hashtree.log | tail -20; else printf 'HASHTREE_RELAY_ISOLATION_OK\\n'; fi",
+		);
+		expect(hashtreeRelayIsolation).toContain('HASHTREE_RELAY_ISOLATION_OK');
 
 		const browserFipsNpub = await page.evaluate(() => {
 			const publicKeyHex = globalThis.irisWebvmV86?.state?.().fipsStatus?.publicKeyHex;
