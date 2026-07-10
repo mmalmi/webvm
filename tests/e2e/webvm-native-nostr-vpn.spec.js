@@ -20,7 +20,11 @@ const GUEST_PAIR_TIMEOUT_MS = Number.parseInt(
 );
 
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the live-host WebVM e2e');
-test.use({ trace: 'off' });
+test.use({
+	trace: 'off',
+	viewport: { width: 1600, height: 1400 },
+	deviceScaleFactor: 2,
+});
 
 function requireRealFile(envName, { executable = false } = {}) {
 	const value = process.env[envName]?.trim();
@@ -65,13 +69,18 @@ function expectCompactBootstrap(joinRequest) {
 }
 
 async function decodeQrScreenshot(screenshot) {
-	const results = await readBarcodes(new Uint8Array(screenshot), {
-		formats: ['QRCode'],
-		tryHarder: true,
-	});
-	const decoded = results.find((result) => result.format === 'QRCode' && result.text);
-	if (!decoded) throw new Error('rendered terminal QR could not be decoded from pixels');
-	return decoded.text;
+	for (const binarizer of ['LocalAverage', 'GlobalHistogram']) {
+		const results = await readBarcodes(new Uint8Array(screenshot), {
+			formats: ['QRCode'],
+			tryHarder: true,
+			tryDenoise: true,
+			tryDownscale: false,
+			binarizer,
+		});
+		const decoded = results.find((result) => result.format === 'QRCode' && result.text);
+		if (decoded) return decoded.text;
+	}
+	throw new Error('rendered terminal QR could not be decoded from pixels');
 }
 
 function defaultNativeHelperManifest() {
@@ -370,10 +379,10 @@ async function captureRenderedPairingQr(page) {
 		if (!consoleElement || !terminal) throw new Error('xterm serial console is unavailable');
 		consoleElement.dataset.e2eStyle = consoleElement.getAttribute('style') || '';
 		Object.assign(consoleElement.style, {
-			height: '960px',
-			width: '1120px',
+			height: '1240px',
+			width: '1440px',
 		});
-		terminal.resize(130, 58);
+		terminal.resize(150, 76);
 		terminal.reset();
 		serial.emulator.serial0_send(`webvm-pair --wait; printf '\\n${readyMarker}\\n'\n`);
 	}, marker);
@@ -391,7 +400,46 @@ async function captureRenderedPairingQr(page) {
 		const screenshot = await terminal.screenshot({
 			animations: 'disabled',
 		});
-		return decodeQrScreenshot(screenshot);
+		try {
+			return await decodeQrScreenshot(screenshot);
+		} catch (error) {
+			const diagnostics = await page.evaluate((screenshotBytes) => {
+				const terminal = globalThis.irisWebvmV86?.serialTerminal;
+				const buffer = terminal?.buffer?.active;
+				let occupiedRows = 0;
+				let maxColumns = 0;
+				let blockGlyphs = 0;
+				const sanitizedLines = [];
+				for (let row = 0; row < (buffer?.length || 0); row += 1) {
+					const line = buffer.getLine(row)?.translateToString(true) || '';
+					if (line.length > 0) {
+						occupiedRows += 1;
+						sanitizedLines.push(line
+							.replace(/nvpn:\/\/[^\s]+/gu, '[redacted-uri]')
+							.replace(/npub1[023456789acdefghjklmnpqrstuvwxyz]+/gu, 'npub1[redacted]')
+							.replace(/[0-9a-f]{64}/giu, '[redacted-key]'));
+					}
+					maxColumns = Math.max(maxColumns, line.length);
+					blockGlyphs += (line.match(/[▀▄█]/gu) || []).length;
+				}
+				const canvases = [...document.querySelectorAll('[data-testid="v86-serial"] canvas')]
+					.map((canvas) => ({ width: canvas.width, height: canvas.height }));
+				return {
+					screenshotBytes,
+					occupiedRows,
+					maxColumns,
+					blockGlyphs,
+					bufferLength: buffer?.length || 0,
+					viewportY: buffer?.viewportY ?? null,
+					baseY: buffer?.baseY ?? null,
+					rows: terminal?.rows || 0,
+					cols: terminal?.cols || 0,
+					canvases,
+					sanitizedLines,
+				};
+			}, screenshot.length);
+			throw new Error(`${error.message}: ${JSON.stringify(diagnostics)}`);
+		}
 	} finally {
 		await page.evaluate(() => {
 			const consoleElement = document.querySelector('[data-testid="v86-serial"]');
