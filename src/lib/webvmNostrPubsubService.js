@@ -28,6 +28,8 @@ function createRelayTransport(relayClients, stats) {
 	return {
 		subscribe(filters, handlers) {
 			stats.subscriptionBatches += 1;
+			stats.recentSubscriptionFilters.push(structuredClone(filters));
+			if (stats.recentSubscriptionFilters.length > 8) stats.recentSubscriptionFilters.shift();
 			let closed = false;
 			const cleanups = [];
 			const subscriptions = relayClients.flatMap((client) =>
@@ -35,6 +37,8 @@ function createRelayTransport(relayClients, stats) {
 					const cleanup = await client.subscribe(filter, {
 						onEvent(event) {
 							stats.relayEvents += 1;
+							stats.recentRelayEvents.push({ id: event.id, kind: event.kind });
+							if (stats.recentRelayEvents.length > 16) stats.recentRelayEvents.shift();
 							handlers.onEvent(event);
 						},
 					});
@@ -117,6 +121,8 @@ export function createWebvmNostrPubsubService({
 		lastServiceError: '',
 		lastServiceErrorMessage: '',
 		unauthorizedPeers: 0,
+		recentSubscriptionFilters: [],
+		recentRelayEvents: [],
 	};
 	const authorizedNode = {
 		registerService(port, handler) {

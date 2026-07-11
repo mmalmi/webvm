@@ -790,6 +790,24 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 			),
 			{ timeout: 30_000, message: 'Hashtree mutable root did not use browser pubsub' },
 		).toBeGreaterThan(hashtreePublishBaseline);
+		const publicNostrVpnClone = await runSerialCommand(
+			page,
+			'public nostr-vpn git clone and pull',
+			"clone=/run/webvm/nostr-vpn-public; rm -rf \"$clone\"; helper_env='HTREE_LOCAL_DAEMON_ONLY=1 HTREE_CONFIG_DIR=/var/lib/hashtree/config HTREE_DATA_DIR=/var/lib/hashtree/data'; clone_output=$(env $helper_env git clone htree://npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/nostr-vpn \"$clone\" 2>&1); clone_rc=$?; pull_output=; pull_rc=1; if [ $clone_rc -eq 0 ]; then pull_output=$(env $helper_env git -C \"$clone\" pull --ff-only 2>&1); pull_rc=$?; fi; if [ $clone_rc -eq 0 ] && [ $pull_rc -eq 0 ] && git -C \"$clone\" rev-parse --verify HEAD >/dev/null 2>&1 && [ -f \"$clone/Cargo.toml\" ]; then printf 'PUBLIC_NOSTR_VPN_CLONE_PULL_OK:%s\\n' \"$(git -C \"$clone\" rev-parse --short=12 HEAD)\"; else printf 'PUBLIC_NOSTR_VPN_CLONE_PULL_FAILED:clone=%s:pull=%s\\n' \"$clone_rc\" \"$pull_rc\"; printf '%s\\n%s\\n' \"$clone_output\" \"$pull_output\" | tail -40; printf '%s\\n' '--- HASHTREE LOG ---'; tail -40 /var/log/webvm-hashtree.log 2>/dev/null; fi; rm -rf \"$clone\"",
+			180_000,
+		);
+		if (!publicNostrVpnClone.some((line) => line.startsWith('PUBLIC_NOSTR_VPN_CLONE_PULL_OK:'))) {
+			const browserPubsub = await page.evaluate(() => ({
+				stats: { ...(globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats || {}) },
+				activePeers: globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activePeerCount?.() ?? -1,
+				activeSubscriptions:
+					globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activeSubscriptionCount?.() ?? -1,
+				fipsStatus: globalThis.irisWebvmV86?.state?.().fipsStatus || null,
+			}));
+			throw new Error(
+				`public nostr-vpn clone failed: ${JSON.stringify({ guest: publicNostrVpnClone, browserPubsub })}`,
+			);
+		}
 		const hashtreeRelayIsolation = await runSerialCommand(
 			page,
 			'Hashtree relay isolation',
