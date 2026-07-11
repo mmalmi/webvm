@@ -145,7 +145,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	const terminal = page.getByTestId('v86-serial');
 	await expect(terminal.locator('.xterm-rows')).toContainText('A private Linux workspace');
 	await expect(terminal.locator('.xterm-rows')).toContainText('Download Nostr VPN (nostrvpn.org)');
-	await expect(terminal.locator('.xterm-rows')).toContainText('Nostr VPN pairing code: webvm-pair');
+	await expect(terminal.locator('.xterm-rows')).toContainText('Nostr VPN:       webvm-pair nvpn://invite/...');
 	await expect(page.locator('header')).toBeHidden();
 	await expect(page.getByTestId('v86-screen')).not.toBeInViewport();
 	const bounds = await terminal.boundingBox();

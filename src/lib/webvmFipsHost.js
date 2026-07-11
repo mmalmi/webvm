@@ -12,7 +12,6 @@ import {
 	WebRtcTransport,
 } from '@fips/transport-webrtc';
 import { createV86EthernetFramePort } from '$lib/v86EthernetFramePort.js';
-import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
 export const DEFAULT_FIPS_RELAYS = Object.freeze([
 	'wss://temp.iris.to',
@@ -95,12 +94,6 @@ export async function createWebvmFipsHost({
 		logger,
 	});
 	const localEthernetPeers = new Set();
-	const pubsub = createWebvmNostrPubsubService({
-		node,
-		relayClients: sharedRelayClients,
-		authorizePeer: (peer) => localEthernetPeers.has(peer),
-		logger,
-	});
 	const webrtcPeerKeys = new Set();
 	let ethernetPeers = 0;
 	let webrtcPeers = 0;
@@ -182,7 +175,6 @@ export async function createWebvmFipsHost({
 	} catch (error) {
 		removePeerListener?.();
 		removeErrorListener?.();
-		await pubsub.stop();
 		await node.stop().catch(() => {});
 		for (const client of sharedRelayClients) client.close();
 		throw error;
@@ -193,7 +185,6 @@ export async function createWebvmFipsHost({
 		node,
 		ethernet,
 		webrtc,
-		pubsub,
 		ethernetFrameStats: framePort.stats,
 		async stop() {
 			stopping = true;
@@ -201,7 +192,6 @@ export async function createWebvmFipsHost({
 			gatewayRetryTimer = undefined;
 			removePeerListener?.();
 			removeErrorListener?.();
-			await pubsub.stop();
 			await node.stop();
 			for (const client of sharedRelayClients) client.close();
 		},

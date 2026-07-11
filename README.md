@@ -5,7 +5,7 @@ Iris WebVM is a private Alpine Linux workspace that runs entirely in the browser
 The guest includes:
 
 - `htree` and `git-remote-htree`
-- Nostr VPN (`nvpn`) with terminal-based pairing
+- Nostr VPN (`nvpn`) with normal network-invite pairing over FIPS
 - `.fips` private names and Hashtree site resolution
 - A root shell with no boot transcript or login step
 

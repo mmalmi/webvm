@@ -19,7 +19,7 @@ cat <<'WELCOME'
 | Pair with Nostr VPN to reach the Internet through your chosen exit node.   |
 +----------------------------------------------------------------------------+
 
-  Pair Nostr VPN:  webvm-pair
+  Pair Nostr VPN:  webvm-pair nvpn://invite/...
   Hashtree:        htree add <path>  |  htree cat <nhash>
   Git over htree:  git clone htree://<npub>/<repo>
 

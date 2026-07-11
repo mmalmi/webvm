@@ -23,7 +23,7 @@
 | Download Nostr VPN (nostrvpn.org) to reach the Internet via an exit node.  |
 ${WELCOME_BORDER}
 
-  Nostr VPN pairing code: webvm-pair
+  Nostr VPN:       webvm-pair nvpn://invite/...
   Hashtree:        htree add <path>  |  htree cat <nhash>
   Git over htree:  git clone htree://<npub>/<repo>
 

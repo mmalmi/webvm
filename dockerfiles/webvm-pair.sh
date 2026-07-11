@@ -1,31 +1,23 @@
 #!/bin/sh
 set -eu
 
-runtime_dir=${WEBVM_RUNTIME_DIR:-/run/webvm}
-pairing_uri_file=${NVPN_WEBVM_PAIRING_URI_FILE:-$runtime_dir/pairing-uri}
 config=${NVPN_WEBVM_CONFIG:-/var/lib/nvpn/config.toml}
-wait_for_uri=false
+invite=${1:-}
 
-case ${1:-} in
-    "") ;;
-    --wait) wait_for_uri=true ;;
+case $invite in
+    nvpn://invite/*) ;;
     *)
-        printf 'usage: webvm-pair [--wait]\n' >&2
+        printf 'usage: webvm-pair nvpn://invite/...\n' >&2
+        printf 'Copy a network invite from an admin device and pass it here.\n' >&2
         exit 64
         ;;
 esac
 
-if $wait_for_uri; then
-    while [ ! -s "$pairing_uri_file" ]; do
-        sleep 1
-    done
-fi
+nvpn import-invite "$invite" --config "$config" >/dev/null
+rc-service webvm-nvpn stop >/dev/null 2>&1 || true
+rc-service webvm-nvpn start >/dev/null
 
-if [ ! -s "$pairing_uri_file" ]; then
-    printf 'Pairing request is not ready. Check: rc-service webvm-nvpn status\n' >&2
-    exit 1
-fi
-
-printf '\n'
-nvpn pairing-qr --config "$config"
-printf '\n'
+printf '%s\n' \
+    'Network invite imported.' \
+    'Join request is being sent to the admin over FIPS.' \
+    'Approve this WebVM on the admin device; the signed roster returns over FIPS.'
