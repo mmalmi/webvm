@@ -1,1 +1,0 @@
-export const networkInterface = undefined;

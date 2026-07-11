@@ -3,6 +3,19 @@ import { createHash } from 'node:crypto';
 
 import { createV86EthernetFramePort } from '../../src/lib/v86EthernetFramePort.js';
 
+test('legacy upstream WebVM routes and assets are not published', async ({ request }) => {
+	for (const path of [
+		'/alpine',
+		'/alpine.html',
+		'/serviceWorker.js',
+		'/assets/webvm_hero.png',
+		'/documents/WebAssemblyTools.pdf',
+	]) {
+		const response = await request.get(path);
+		expect(response.status(), path).toBe(404);
+	}
+});
+
 function installMockV86(page) {
 	return page.addInitScript(() => {
 		window.__v86RouteTestState = {
