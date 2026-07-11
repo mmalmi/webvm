@@ -83,6 +83,7 @@ export async function createWebvmFipsHost({
 		identity,
 		transports: [ethernet, webrtc],
 		forwarding: true,
+		routingMode: 'reply_learned',
 		heartbeatIntervalMs: 1_000,
 		logger,
 	});
