@@ -47,6 +47,8 @@ async function savedDiskExists(page) {
 
 test('real v86 starts with clean history and persists files until reset', async ({ page }) => {
 	await page.goto('/v86');
+	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
+		.toContainText('Starting FIPS networking...');
 	await waitForTerminal(page);
 	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk');
 

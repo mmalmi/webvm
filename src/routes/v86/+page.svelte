@@ -17,7 +17,7 @@
 	const SERIAL_BUFFER_LIMIT = 128 * 1024;
 	const WELCOME_BORDER = '+----------------------------------------------------------------------------+';
 	const RESUME_READY_MARKER = '__IRIS_WEBVM_RESUMED__';
-	const STARTUP_STATUS_TEXT = 'Starting Linux...\r\n';
+	const STARTUP_STATUS_TEXT = 'Starting FIPS networking...\r\n';
 	const INTRO_TEXT = `${WELCOME_BORDER}
 | Iris WebVM                                                                |
 |                                                                            |

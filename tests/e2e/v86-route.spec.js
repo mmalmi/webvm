@@ -170,7 +170,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	await expect(terminal.locator('.xterm-rows')).toContainText('FIPS and peer status:    nvpn status');
 	await expect(page.locator('header')).toBeHidden();
 	await expect(page.getByTestId('v86-screen')).not.toBeInViewport();
-	await expect(terminal.locator('.xterm-rows')).toContainText('Starting Linux...');
+	await expect(terminal.locator('.xterm-rows')).toContainText('Starting FIPS networking...');
 	const bounds = await terminal.boundingBox();
 	expect(bounds).toMatchObject({ x: 0, y: 0 });
 	expect(bounds.width).toBe(1280);
@@ -221,7 +221,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 		}
 	});
 	await expect(terminal.locator('.xterm-rows')).toContainText('root@webvm:~#');
-	await expect(terminal.locator('.xterm-rows')).not.toContainText('Starting Linux...');
+	await expect(terminal.locator('.xterm-rows')).not.toContainText('Starting FIPS networking...');
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 });
 
