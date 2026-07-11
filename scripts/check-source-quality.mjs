@@ -40,7 +40,7 @@ for (const file of sourceFiles) {
 	if (/\r/u.test(source)) failures.push(`${file}: contains CRLF/CR line endings`);
 	if (/[ \t]+$/mu.test(source)) failures.push(`${file}: contains trailing whitespace`);
 	if (/\bdebugger\s*;/u.test(source)) failures.push(`${file}: contains a debugger statement`);
-	if (/\beval\s*\(/u.test(source)) failures.push(`${file}: uses eval()`);
+	if (/\beval\s*\(/u.test(source)) failures.push(`${file}: uses dynamic code evaluation`);
 }
 
 for (const file of sourceFiles.filter((file) => ['.js', '.mjs'].includes(path.extname(file)))) {
