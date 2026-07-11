@@ -16,10 +16,22 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 
 	await expect(page.getByTestId('v86-route')).toBeVisible();
 	await expect(page.getByTestId('v86-fips-state')).toHaveText('FIPS connected');
-	await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
 	await expect(page.getByTestId('v86-status')).toContainText(/WebVM (loaded|ready|running)/);
-	await expect(page.getByTestId('v86-serial').locator('.xterm-rows')).toContainText('Iris WebVM');
-	await expect(page.getByTestId('v86-serial').locator('.xterm-rows')).toContainText(/\S+:~[#$]/);
+	const terminal = page.getByTestId('v86-serial');
+	const rows = terminal.locator('.xterm-rows');
+	await expect(rows).toContainText('Iris WebVM');
+	await expect(rows).toContainText(/\S+:~[#$]/);
+
+	await terminal.click();
+	await page.keyboard.insertText(
+		'a=__WEBVM_FIPS_; b=READY__; ' +
+		'for attempt in $(seq 1 30); do ' +
+		'if ping -c 1 -W 5 npub1uf4ua9n0hm2x4ct8sqcyqfh7w0s9n5qej9gpjjqjf9z0lsmh3jtsqyduhs.fips ' +
+		'>/dev/null 2>&1; then printf "%s%s\\n" "$a" "$b"; break; fi; sleep 1; done',
+	);
+	await page.keyboard.press('Enter');
+	await expect(rows).toContainText('__WEBVM_FIPS_READY__', { timeout: 180_000 });
+	await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
 
 	await expect(page.getByText('Tailscale')).toHaveCount(0);
 	await expect(page.getByText('Pairing', { exact: true })).toHaveCount(0);
