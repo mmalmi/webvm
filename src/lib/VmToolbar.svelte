@@ -1,11 +1,28 @@
 <script>
 	export let diskStatus;
+	export let diskUsageBytes;
 	export let resetting;
 	export let onReset;
+
+	function formatBytes(bytes) {
+		if (!Number.isFinite(bytes)) return '';
+		const units = ['B', 'KB', 'MB', 'GB'];
+		let value = bytes;
+		let unit = 0;
+		while (value >= 1_000 && unit < units.length - 1) {
+			value /= 1_000;
+			unit += 1;
+		}
+		return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+	}
+
+	$: diskSize = formatBytes(diskUsageBytes);
 </script>
 
 <div class="vm-toolbar" aria-label="WebVM controls">
-	<span>{diskStatus === 'ready' ? 'Local disk' : `Disk ${diskStatus}`}</span>
+	<span>
+		{diskStatus === 'ready' ? 'Local disk' : `Disk ${diskStatus}`}{diskSize ? ` · ${diskSize}` : ''}
+	</span>
 	<button data-testid="v86-reset" type="button" on:click={onReset} disabled={resetting}>
 		Reset VM
 	</button>

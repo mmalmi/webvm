@@ -47,6 +47,7 @@ ${WELCOME_BORDER}
 	let emulator = null;
 	let diskController = null;
 	let diskStatus = 'loading';
+	let diskUsageBytes = null;
 	let resettingVm = false;
 	let fipsHost = null;
 	let terminalReady = false;
@@ -251,8 +252,9 @@ ${WELCOME_BORDER}
 			diskController = await attachWebvmDisk({
 				compatibilityId: await diskCompatibilityId(),
 				filesystem: instance.fs9p,
-				onStatus(status) {
+				onStatus(status, usageBytes = null) {
 					diskStatus = status;
+					diskUsageBytes = usageBytes;
 				},
 			});
 		} catch (error) {
@@ -443,7 +445,7 @@ ${WELCOME_BORDER}
 		role="application"
 		aria-label="Iris WebVM terminal"
 	></div>
-	<VmToolbar {diskStatus} resetting={resettingVm} onReset={resetVm} />
+	<VmToolbar {diskStatus} {diskUsageBytes} resetting={resettingVm} onReset={resetVm} />
 </main>
 
 <style>

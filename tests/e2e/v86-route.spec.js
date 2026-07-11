@@ -256,8 +256,17 @@ test('v86 accepts input only after the resumed shell is ready', async ({ page })
 
 test('v86 persists its local disk and can reset it', async ({ page }) => {
 	await installMockV86(page);
+	await page.addInitScript(() => {
+		Object.defineProperty(navigator, 'storage', {
+			configurable: true,
+			value: {
+				estimate: async () => ({ usageDetails: { indexedDB: 2_048 } }),
+				persist: async () => true,
+			},
+		});
+	});
 	await page.goto('/v86?cold-boot');
-	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk');
+	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk · 2.0 KB');
 
 	await page.evaluate(() => {
 		const filesystem = window.__v86RouteTestState.emulator.fs9p;
@@ -285,7 +294,10 @@ test('v86 persists its local disk and can reset it', async ({ page }) => {
 		() => window.__v86RouteTestState.filesystemStates.at(-1)?.[0],
 	)).toBe('saved-file');
 
-	page.once('dialog', (dialog) => dialog.accept());
+	page.once('dialog', async (dialog) => {
+		expect(dialog.message()).toBe("Delete this browser's saved WebVM disk and start clean?");
+		await dialog.accept();
+	});
 	await Promise.all([
 		page.waitForEvent('load'),
 		page.getByTestId('v86-reset').click(),

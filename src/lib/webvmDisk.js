@@ -50,6 +50,16 @@ async function clearRecord() {
 	await runTransaction('readwrite', (store) => requestToPromise(store.delete(RECORD_KEY)));
 }
 
+async function indexedDbUsageBytes() {
+	try {
+		const estimate = await navigator.storage?.estimate?.();
+		const bytes = estimate?.usageDetails?.indexedDB;
+		return Number.isFinite(bytes) ? bytes : null;
+	} catch {
+		return null;
+	}
+}
+
 function serializableFilesystemState(filesystem) {
 	const state = filesystem.get_state();
 	if (!Array.isArray(state[0])) return state;
@@ -74,6 +84,7 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 	let saveTimer = null;
 	let saveTask = Promise.resolve();
 	const originalNotifyListeners = filesystem.NotifyListeners;
+	const publishReadyStatus = async () => onStatus?.('ready', await indexedDbUsageBytes());
 
 	try {
 		const record = await loadRecord();
@@ -81,7 +92,7 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 			filesystem.set_state(record.state);
 		}
 		void navigator.storage?.persist?.().catch(() => false);
-		onStatus?.('ready');
+		await publishReadyStatus();
 	} catch (error) {
 		console.error('WebVM local disk is unavailable', error);
 		onStatus?.('unavailable');
@@ -102,6 +113,7 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 		const state = serializableFilesystemState(filesystem);
 		saveTask = saveTask.then(async () => {
 			await saveRecord({ schema: 1, compatibilityId, state });
+			await publishReadyStatus();
 			if (changeVersion === version) changeVersion = 0;
 			else scheduleSave();
 		}).catch((error) => {
