@@ -50,6 +50,19 @@ async function clearRecord() {
 	await runTransaction('readwrite', (store) => requestToPromise(store.delete(RECORD_KEY)));
 }
 
+function serializableFilesystemState(filesystem) {
+	const state = filesystem.get_state();
+	if (!Array.isArray(state[0])) return state;
+	if (state.length > 5) throw new Error('Mounted 9p filesystems cannot be persisted safely');
+	state[0] = state[0].map((inode) => {
+		if (!inode?.get_state) return inode;
+		const inodeState = inode.get_state();
+		inodeState[2] = inodeState[2].map((lock) => lock?.get_state?.() ?? lock);
+		return inodeState;
+	});
+	return state;
+}
+
 export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus }) {
 	if (!globalThis.indexedDB || !filesystem?.get_state || !filesystem?.set_state) {
 		onStatus?.('unavailable');
@@ -86,7 +99,7 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 	async function flush() {
 		if (disposed || changeVersion === 0) return saveTask;
 		const version = changeVersion;
-		const state = filesystem.get_state();
+		const state = serializableFilesystemState(filesystem);
 		saveTask = saveTask.then(async () => {
 			await saveRecord({ schema: 1, compatibilityId, state });
 			if (changeVersion === version) changeVersion = 0;

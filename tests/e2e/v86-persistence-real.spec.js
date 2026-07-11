@@ -60,6 +60,7 @@ test('real v86 starts with clean history and persists files until reset', async 
 		"printf 'browser-local-data\\n' > /root/webvm-persistence-check",
 		'__FILE_WRITTEN__',
 	);
+	await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
 	await expect.poll(() => savedDiskExists(page), { timeout: 15_000 }).toBe(true);
 
 	await page.reload();

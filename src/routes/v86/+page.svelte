@@ -381,6 +381,7 @@ ${WELCOME_BORDER}
 		globalThis.irisWebvmV86 = {
 			emulator,
 			fipsHost,
+			flushDisk: () => diskController?.flush(),
 			serialTerminal,
 			state: () => ({
 				vmState,
