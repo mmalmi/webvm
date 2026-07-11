@@ -19,7 +19,7 @@
 |                                                                            |
 | A private Linux workspace running entirely in your browser.                |
 | FIPS networking and Hashtree work immediately, without a VPN login.        |
-| Pair with Nostr VPN to reach the Internet through your chosen exit node.   |
+| Pair at nostrvpn.org to reach the Internet through your chosen exit node.  |
 ${WELCOME_BORDER}
 
   Pair Nostr VPN:  webvm-pair
@@ -172,8 +172,8 @@ ${WELCOME_BORDER}
 			instance.serial0_send?.(
 				`stty echo; ` +
 				(snapshotBuild ? '' :
-					`rc-service webvm-hashtree start >/dev/null 2>&1; ` +
-					`rc-service webvm-nvpn start >/dev/null 2>&1; `) +
+					`sh -c '(rc-service webvm-hashtree start; ` +
+					`rc-service webvm-nvpn start) >/dev/null 2>&1 &'; `) +
 				`printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED\n`,
 			);
 		}, 50);

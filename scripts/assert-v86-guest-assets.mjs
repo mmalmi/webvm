@@ -86,11 +86,13 @@ const v86Package = JSON.parse(await readFile(path.join(root, 'node_modules/v86/p
 const guestManifestRecord = await fileRecord(manifestPath);
 if (
 	stateManifest.schema !== 1 ||
+	stateManifest.encoding !== 'zstd' ||
 	stateManifest.memoryBytes !== 96 * 1024 * 1024 ||
 	stateManifest.v86Version !== v86Package.version ||
 	stateManifest.guestManifestSha256 !== guestManifestRecord.sha256 ||
 	!Array.isArray(stateManifest.chunks) ||
-	stateManifest.chunks.length === 0
+	stateManifest.chunks.length !== 1 ||
+	stateManifest.bytes > 20 * 1024 * 1024
 ) {
 	throw new Error('Preinitialized v86 state metadata is stale; run npm run state:build');
 }

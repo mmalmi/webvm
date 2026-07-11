@@ -131,6 +131,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 
 	const terminal = page.getByTestId('v86-serial');
 	await expect(terminal.locator('.xterm-rows')).toContainText('A private Linux workspace');
+	await expect(terminal.locator('.xterm-rows')).toContainText('nostrvpn.org');
 	await expect(page.locator('header')).toBeHidden();
 	await expect(page.getByTestId('v86-screen')).not.toBeInViewport();
 	const bounds = await terminal.boundingBox();
@@ -154,6 +155,11 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	await expect.poll(() => page.evaluate(
 		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-hashtree start')),
 	)).toBe(true);
+	const resumeCommand = await page.evaluate(() => window.__v86RouteTestState.serialSends.find(
+		(text) => text.includes('webvm-hashtree start'),
+	));
+	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start;");
+	expect(resumeCommand).toContain("webvm-nvpn start) >/dev/null 2>&1 &'");
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 
 	await page.evaluate(() => {

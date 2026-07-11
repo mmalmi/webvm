@@ -78,6 +78,12 @@ async function captureState(downloadPath) {
 				"test ! -e /var/lib/hashtree/config/keys && " +
 				"test ! -e /var/lib/hashtree/config/auth.cookie && " +
 				"test -z \"$(find /var/lib/nvpn /var/lib/hashtree/data -type f -print -quit)\" && " +
+				"sync && echo 3 > /proc/sys/vm/drop_caches && " +
+				"mkdir -p /run/webvm-snapshot-scrub && " +
+				"mount -t tmpfs -o size=36m tmpfs /run/webvm-snapshot-scrub && " +
+				"dd if=/dev/zero of=/run/webvm-snapshot-scrub/zero bs=1M count=36 >/dev/null 2>&1 && " +
+				"rm /run/webvm-snapshot-scrub/zero && " +
+				"umount /run/webvm-snapshot-scrub && rmdir /run/webvm-snapshot-scrub && " +
 				"sync && echo 3 > /proc/sys/vm/drop_caches && stty echo && " +
 				"printf '__IRIS_SNAPSHOT_%s__\\n' READY\n",
 			);
@@ -122,10 +128,19 @@ async function main() {
 	await run('npx', ['vite', 'build']);
 	const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'iris-webvm-state-'));
 	const statePath = path.join(temporaryDirectory, 'state.bin');
+	const compressedStatePath = path.join(temporaryDirectory, 'state.bin.zst');
 	try {
 		await captureState(statePath);
+		await run('zstd', [
+			'-3',
+			'--no-progress',
+			'--force',
+			statePath,
+			'-o',
+			compressedStatePath,
+		]);
 		const [state, guestManifest, v86Package] = await Promise.all([
-			readFile(statePath),
+			readFile(compressedStatePath),
 			readFile(guestManifestPath),
 			readFile(path.join(root, 'node_modules/v86/package.json'), 'utf8').then(JSON.parse),
 		]);
@@ -142,6 +157,7 @@ async function main() {
 
 		const manifest = {
 			schema: 1,
+			encoding: 'zstd',
 			createdAt: new Date().toISOString(),
 			bytes: state.length,
 			memoryBytes: 96 * 1024 * 1024,
