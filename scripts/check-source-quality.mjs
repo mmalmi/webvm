@@ -10,7 +10,15 @@ const MAX_SOURCE_LINES = 500;
 const MAX_SOURCE_BYTES = 256 * 1024;
 
 function trackedFiles(patterns) {
-	const output = execFileSync('git', ['ls-files', '-z', '--', ...patterns], {
+	const output = execFileSync('git', [
+		'ls-files',
+		'-z',
+		'--cached',
+		'--others',
+		'--exclude-standard',
+		'--',
+		...patterns,
+	], {
 		cwd: ROOT,
 		encoding: 'utf8',
 	});

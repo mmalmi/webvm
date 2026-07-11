@@ -138,6 +138,29 @@ test('v86 boots only same-origin guest assets and starts the generic FIPS host',
 	expect(state.ran).toBe(true);
 });
 
+test('v86 preloads the nVPN guest blob while restoring the VM', async ({ page }) => {
+	let binaryRequested = false;
+	await page.route('**/v86/guest/fs.json', (route) => route.fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify({
+			fsroot: [['usr', 0, 0, 0, 0, 0, [
+				['local', 0, 0, 0, 0, 0, [
+					['bin', 0, 0, 0, 0, 0, [
+						['nvpn', 42, 0, 0, 0, 0, 'nvpn-test.bin.zst'],
+					]],
+				]],
+			]]],
+		}),
+	}));
+	await page.route('**/v86/guest/rootfs/nvpn-test.bin.zst', (route) => {
+		binaryRequested = true;
+		return route.fulfill({ body: Buffer.from([1, 2, 3]) });
+	});
+	await installMockV86(page);
+	await page.goto('/v86?cold-boot');
+	await expect.poll(() => binaryRequested).toBe(true);
+});
+
 test('v86 presents one WebVM-style terminal and never reveals cold-boot output', async ({ page }) => {
 	await installMockV86(page);
 	await page.goto('/v86?cold-boot');
