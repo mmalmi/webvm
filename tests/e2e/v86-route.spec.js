@@ -173,9 +173,9 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 		(text) => text.includes('webvm-nvpn start'),
 	));
 	expect(resumeCommand).toContain("hostname webvm; export PS1='root@webvm:\\w# '");
-	expect(resumeCommand).toContain("sh -c '(rc-service webvm-nvpn start >/dev/null 2>&1 &");
+	expect(resumeCommand).toContain("sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'");
 	expect(resumeCommand).toContain('grep -q "^# Managed by nvpn webvm-guest$" /etc/resolv.conf');
-	expect(resumeCommand).toContain("rc-service webvm-hashtree start >/dev/null 2>&1) &'");
+	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'");
 	expect(resumeCommand).toMatch(
 		/^stty echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p > \/dev\/urandom; /,
 	);
@@ -198,7 +198,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 });
 
-test('v86 preserves commands entered before the resumed shell is ready', async ({ page }) => {
+test('v86 accepts input only after the resumed shell is ready', async ({ page }) => {
 	await installMockV86(page);
 	await page.goto('/v86?cold-boot');
 
@@ -206,11 +206,8 @@ test('v86 preserves commands entered before the resumed shell is ready', async (
 	await page.getByTestId('v86-serial').click();
 	await page.keyboard.type(command);
 	await page.keyboard.press('Enter');
-	await expect.poll(() => page.evaluate(
-		() => globalThis.irisWebvmV86.state().pendingInputLength,
-	)).toBe(command.length + 1);
 	expect(await page.evaluate(
-		(commandText) => window.__v86RouteTestState.serialSends.includes(`${commandText}\r`),
+		(commandText) => window.__v86RouteTestState.serialSends.join('').includes(`${commandText}\r`),
 		command,
 	)).toBe(false);
 
@@ -221,15 +218,13 @@ test('v86 preserves commands entered before the resumed shell is ready', async (
 			}
 		}
 	});
+	await page.getByTestId('v86-serial').click();
+	await page.keyboard.type(command);
+	await page.keyboard.press('Enter');
 	await expect.poll(() => page.evaluate(
-		(commandText) => window.__v86RouteTestState.serialSends.filter(
-			(text) => text === `${commandText}\r`,
-		).length,
+		(commandText) => window.__v86RouteTestState.serialSends.join('').includes(`${commandText}\r`),
 		command,
-	)).toBe(1);
-	expect(await page.evaluate(
-		() => globalThis.irisWebvmV86.state().pendingInputLength,
-	)).toBe(0);
+	)).toBe(true);
 });
 
 test('v86 restores the preinitialized logged-in environment before starting guest services', async ({ page }) => {
