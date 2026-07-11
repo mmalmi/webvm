@@ -9,7 +9,7 @@ V86_REPO=${V86_REPO_PATH:-$ROOT/../v86}
 TARGET=i686-unknown-linux-musl
 HTREE_TARGET_DIR=${HTREE_TARGET_DIR:-${CARGO_TARGET_DIR:-$HOME/.cache/cargo-target}}
 OUTPUT_DIR=${V86_GUEST_OUTPUT_DIR:-$ROOT/custom-disk-images/v86-guest}
-STAGE_DIR=$ROOT/custom-disk-images/.v86-guest-stage
+STAGE_DIR=$(mktemp -d "$ROOT/custom-disk-images/.v86-guest-stage.XXXXXX")
 IMAGE=iris-webvm-v86-guest:i686
 CONTAINER=iris-webvm-v86-guest-$$
 CONVERTER_PLATFORM=${V86_IMAGE_CONVERTER_PLATFORM:-$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')}
@@ -77,8 +77,8 @@ require_i386_elf "$NVPN_BINARY"
 require_i386_elf "$HTREE_BINARY"
 require_i386_elf "$GIT_REMOTE_HTREE_BINARY"
 
-rm -rf "$STAGE_DIR" "$OUTPUT_DIR"
-mkdir -p "$STAGE_DIR" "$OUTPUT_DIR/rootfs" "$OUTPUT_DIR/state"
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR/rootfs" "$OUTPUT_DIR/state"
 cp "$NVPN_BINARY" "$STAGE_DIR/nvpn"
 cp "$HTREE_BINARY" "$STAGE_DIR/htree"
 cp "$GIT_REMOTE_HTREE_BINARY" "$STAGE_DIR/git-remote-htree"
