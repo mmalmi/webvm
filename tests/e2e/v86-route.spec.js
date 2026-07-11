@@ -190,6 +190,28 @@ test('v86 restores the preinitialized logged-in environment before starting gues
 	await expect.poll(() => page.evaluate(
 		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-hashtree start')),
 	)).toBe(true);
+	await page.evaluate(() => {
+		const commandEcho = window.__v86RouteTestState.serialSends.find(
+			(text) => text.includes('webvm-hashtree start'),
+		);
+		for (const character of commandEcho) {
+			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
+				listener(character.charCodeAt(0));
+			}
+		}
+	});
+	expect(await page.evaluate(() => globalThis.irisWebvmV86.state().terminalReady)).toBe(false);
+	await page.evaluate(() => {
+		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\n(none):~# ') {
+			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
+				listener(character.charCodeAt(0));
+			}
+		}
+	});
+	const terminalText = page.getByTestId('v86-serial').locator('.xterm-rows');
+	await expect(terminalText).toContainText('(none):~#');
+	await expect(terminalText).not.toContainText('__IRIS_WEBVM_RESUMED__');
+	await expect(terminalText).not.toContainText('rc-service webvm-hashtree');
 });
 
 test('v86 frame port carries complete Ethernet frames in both directions', () => {

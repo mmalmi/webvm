@@ -174,7 +174,7 @@ ${WELCOME_BORDER}
 				(snapshotBuild ? '' :
 					`rc-service webvm-hashtree start >/dev/null 2>&1; ` +
 					`rc-service webvm-nvpn start >/dev/null 2>&1; `) +
-				`printf '\\n${RESUME_READY_MARKER}\\n'\n`,
+				`printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED\n`,
 			);
 		}, 50);
 	}
