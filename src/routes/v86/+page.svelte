@@ -12,6 +12,7 @@
 	const GUEST_ROOTFS_URL = '/v86/guest/rootfs/';
 	const GUEST_STATE_MANIFEST_URL = '/v86/guest/state/manifest.json';
 	const SERIAL_BUFFER_LIMIT = 128 * 1024;
+	const PENDING_INPUT_LIMIT = 8 * 1024;
 	const WELCOME_BORDER = '+----------------------------------------------------------------------------+';
 	const RESUME_READY_MARKER = '__IRIS_WEBVM_RESUMED__';
 	const INTRO_TEXT = `${WELCOME_BORDER}
@@ -43,6 +44,7 @@ ${WELCOME_BORDER}
 	let fipsHost = null;
 	let terminalReady = false;
 	let startupOutput = '';
+	let pendingSerialInput = '';
 	let resumeRequested = false;
 	let vmState = 'loading';
 	let vmSummary = 'Loading WebVM';
@@ -118,7 +120,6 @@ ${WELCOME_BORDER}
 					return;
 				}
 
-				terminalReady = true;
 				serialTerminal?.reset();
 				serialTerminal?.write(INTRO_TEXT);
 				const resumedOutput = startupOutput
@@ -126,6 +127,10 @@ ${WELCOME_BORDER}
 					.replace(/^\r?\n/, '');
 				serialTerminal?.write(resumedOutput);
 				startupOutput = '';
+				terminalReady = true;
+				const queuedInput = pendingSerialInput;
+				pendingSerialInput = '';
+				if (queuedInput) instance.serial0_send?.(queuedInput);
 				serialTerminal?.focus();
 				publishDebugState();
 			}),
@@ -154,8 +159,14 @@ ${WELCOME_BORDER}
 		serialFitAddon.fit();
 		serialTerminal.write(INTRO_TEXT);
 		serialInputDisposable = serialTerminal.onData((data) => {
-			if (terminalReady) emulator?.serial0_send?.(data);
+			if (terminalReady) {
+				emulator?.serial0_send?.(data);
+				return;
+			}
+			const remainingCapacity = PENDING_INPUT_LIMIT - pendingSerialInput.length;
+			if (remainingCapacity > 0) pendingSerialInput += data.slice(0, remainingCapacity);
 		});
+		serialTerminal.focus();
 		serialResizeObserver = new ResizeObserver(() => {
 			if (serialConsole?.dataset.e2eStyle !== undefined) return;
 			serialFitAddon?.fit();
@@ -341,6 +352,7 @@ ${WELCOME_BORDER}
 				vmError,
 				fipsStatus,
 				terminalReady,
+				pendingInputLength: pendingSerialInput.length,
 			}),
 		};
 	}
@@ -352,6 +364,7 @@ ${WELCOME_BORDER}
 
 	onDestroy(() => {
 		destroyed = true;
+		pendingSerialInput = '';
 		for (const removeListener of removeEmulatorListeners) removeListener?.();
 		removeEmulatorListeners = [];
 		serialInputDisposable?.dispose?.();

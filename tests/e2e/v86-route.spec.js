@@ -193,6 +193,40 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 });
 
+test('v86 preserves commands entered before the resumed shell is ready', async ({ page }) => {
+	await installMockV86(page);
+	await page.goto('/v86?cold-boot');
+
+	const command = 'printf early-input-works';
+	await page.getByTestId('v86-serial').click();
+	await page.keyboard.type(command);
+	await page.keyboard.press('Enter');
+	await expect.poll(() => page.evaluate(
+		() => globalThis.irisWebvmV86.state().pendingInputLength,
+	)).toBe(command.length + 1);
+	expect(await page.evaluate(
+		(commandText) => window.__v86RouteTestState.serialSends.includes(`${commandText}\r`),
+		command,
+	)).toBe(false);
+
+	await page.evaluate(() => {
+		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\n(none):~# ') {
+			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
+				listener(character.charCodeAt(0));
+			}
+		}
+	});
+	await expect.poll(() => page.evaluate(
+		(commandText) => window.__v86RouteTestState.serialSends.filter(
+			(text) => text === `${commandText}\r`,
+		).length,
+		command,
+	)).toBe(1);
+	expect(await page.evaluate(
+		() => globalThis.irisWebvmV86.state().pendingInputLength,
+	)).toBe(0);
+});
+
 test('v86 restores the preinitialized logged-in environment before starting guest services', async ({ page }) => {
 	const state = Buffer.from([1, 3, 3, 7]);
 	await page.route('**/v86/guest/state/manifest.json', (route) => route.fulfill({
