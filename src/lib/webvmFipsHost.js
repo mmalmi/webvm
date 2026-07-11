@@ -106,6 +106,32 @@ export async function createWebvmFipsHost({
 	let webrtcPeers = 0;
 	let lastPeerError = '';
 	let lastPeerErrorWhere = '';
+	let gatewayConnected = false;
+	let gatewayAttemptRunning = false;
+	let gatewayRetryTimer;
+	let stopping = false;
+	const normalizedGatewayPubkey = gatewayPubkey?.toLowerCase() || '';
+	const scheduleGatewayConnect = (delayMs = 0) => {
+		if (!normalizedGatewayPubkey || stopping || gatewayConnected || gatewayRetryTimer) return;
+		gatewayRetryTimer = setTimeout(() => {
+			gatewayRetryTimer = undefined;
+			void connectGateway();
+		}, delayMs);
+	};
+	const connectGateway = async () => {
+		if (stopping || gatewayConnected || gatewayAttemptRunning) return;
+		gatewayAttemptRunning = true;
+		try {
+			await node.connect({ transport: 'webrtc', addr: normalizedGatewayPubkey });
+		} catch (error) {
+			lastPeerError = error instanceof Error ? error.message : String(error);
+			lastPeerErrorWhere = 'connect FIPS gateway';
+			publishStatus();
+		} finally {
+			gatewayAttemptRunning = false;
+			if (!gatewayConnected) scheduleGatewayConnect(2_000);
+		}
+	};
 	const publishStatus = (state = 'ready', error = '') => {
 		onStatus({
 			state,
@@ -131,6 +157,10 @@ export async function createWebvmFipsHost({
 		if (event?.remoteAddr?.transport === 'webrtc') {
 			if (connected) webrtcPeerKeys.add(peer);
 			else webrtcPeerKeys.delete(peer);
+			if (peer === normalizedGatewayPubkey) {
+				gatewayConnected = connected;
+				if (!connected) scheduleGatewayConnect();
+			}
 		}
 		ethernetPeers = localEthernetPeers.size;
 		webrtcPeers = webrtcPeerKeys.size;
@@ -147,13 +177,7 @@ export async function createWebvmFipsHost({
 	publishStatus('starting');
 	try {
 		await node.start();
-		if (gatewayPubkey) {
-			void node.connect({ transport: 'webrtc', addr: gatewayPubkey }).catch((error) => {
-				lastPeerError = error instanceof Error ? error.message : String(error);
-				lastPeerErrorWhere = 'connect FIPS gateway';
-				publishStatus();
-			});
-		}
+		scheduleGatewayConnect();
 		publishStatus();
 	} catch (error) {
 		removePeerListener?.();
@@ -172,6 +196,9 @@ export async function createWebvmFipsHost({
 		pubsub,
 		ethernetFrameStats: framePort.stats,
 		async stop() {
+			stopping = true;
+			if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
+			gatewayRetryTimer = undefined;
 			removePeerListener?.();
 			removeErrorListener?.();
 			await pubsub.stop();
