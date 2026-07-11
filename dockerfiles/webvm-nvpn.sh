@@ -11,8 +11,9 @@ tun_interface=${NVPN_WEBVM_TUN_INTERFACE:-nvpn0}
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
 
-exec nvpn webvm-guest \
+exec nvpn daemon \
+    --service \
     --config "$config" \
-    --ethernet-interface "$interface" \
-    --discovery-scope "$scope" \
-    --tun-interface "$tun_interface"
+    --iface "$tun_interface" \
+    --webvm-ethernet-interface "$interface" \
+    --webvm-discovery-scope "$scope"

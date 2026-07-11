@@ -145,7 +145,8 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	const terminal = page.getByTestId('v86-serial');
 	await expect(terminal.locator('.xterm-rows')).toContainText('A private Linux workspace');
 	await expect(terminal.locator('.xterm-rows')).toContainText('Download Nostr VPN (nostrvpn.org)');
-	await expect(terminal.locator('.xterm-rows')).toContainText('Nostr VPN pairing code: webvm-pair nvpn://invite/...');
+	await expect(terminal.locator('.xterm-rows')).toContainText('Nostr VPN join request:  nvpn join-request');
+	await expect(terminal.locator('.xterm-rows')).toContainText('FIPS and peer status:    nvpn status');
 	await expect(page.locator('header')).toBeHidden();
 	await expect(page.getByTestId('v86-screen')).not.toBeInViewport();
 	const bounds = await terminal.boundingBox();
@@ -174,7 +175,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	));
 	expect(resumeCommand).toContain("hostname webvm; export PS1='root@webvm:\\w# '");
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'");
-	expect(resumeCommand).toContain('grep -q "^# Managed by nvpn webvm-guest$" /etc/resolv.conf');
+	expect(resumeCommand).toContain('grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf');
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'");
 	expect(resumeCommand).toMatch(
 		/^stty echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p > \/dev\/urandom; /,

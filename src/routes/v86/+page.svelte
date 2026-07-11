@@ -19,12 +19,13 @@
 |                                                                            |
 | A private Linux workspace running entirely in your browser.                |
 | FIPS networking and Hashtree work immediately, without a VPN login.        |
-| Download Nostr VPN (nostrvpn.org) to reach the Internet via an exit node.  |
+| Download Nostr VPN (nostrvpn.org) to approve this device and add an exit.  |
 ${WELCOME_BORDER}
 
-  Nostr VPN pairing code: webvm-pair nvpn://invite/...
-  Hashtree:        htree add <path>  |  htree cat <nhash>
-  Git over htree:  git clone htree://<npub>/<repo>
+  Nostr VPN join request:  nvpn join-request
+  FIPS and peer status:    nvpn status
+  Hashtree:                htree add <path>  |  htree cat <nhash>
+  Git over htree:          git clone htree://<npub>/<repo>
 
   Private names:   <npub>.fips
   Hashtree sites:  <nhash>.iris.localhost
@@ -182,7 +183,7 @@ ${WELCOME_BORDER}
 				(snapshotBuild ? '' :
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
 					`for attempt in $(seq 1 150); do ` +
-					`grep -q "^# Managed by nvpn webvm-guest$" /etc/resolv.conf && break; ` +
+					`grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf && break; ` +
 					`sleep 0.1; done; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
 				`printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED\n`,

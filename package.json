@@ -4,6 +4,7 @@
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
+		"lint": "node scripts/check-source-quality.mjs",
 		"build": "node scripts/assert-v86-guest-assets.mjs && vite build",
 		"guest:build": "bash scripts/build-v86-guest.sh && npm run state:build",
 		"state:build": "node scripts/build-v86-state.mjs",
@@ -25,13 +26,16 @@
 		"svelte": "^4.2.7",
 		"tailwindcss": "^3.4.9",
 		"vite": "^5.0.3",
-		"vite-plugin-static-copy": "^1.0.6"
+		"vite-plugin-static-copy": "^1.0.6",
+		"zxing-wasm": "^3.1.0"
 	},
 	"type": "module",
 	"dependencies": {
 		"@fips/core": "file:vendor/fips/fips-core-0.0.15.tgz",
 		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.14.tgz",
 		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.17.tgz",
+		"nostr-pubsub": "file:vendor/nostr-pubsub-0.1.2.tgz",
+		"nostr-tools": "^2.23.9",
 		"v86": "^0.5.424"
 	}
 }

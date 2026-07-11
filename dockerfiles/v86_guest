@@ -12,12 +12,9 @@ RUN apk add --no-cache \
     git \
     iproute2 \
     iptables \
-    libqrencode-tools \
     linux-firmware-none \
     linux-virt \
     openrc
-
-RUN apk del libqrencode-tools
 
 COPY nvpn /usr/local/bin/nvpn
 COPY htree /usr/local/bin/htree
@@ -26,7 +23,6 @@ COPY webvm-profile.sh /etc/profile.d/webvm.sh
 COPY webvm-network.sh /usr/local/sbin/webvm-network
 COPY webvm-tun.sh /usr/local/sbin/webvm-tun
 COPY webvm-nvpn.sh /usr/local/sbin/webvm-nvpn
-COPY webvm-pair.sh /usr/local/bin/webvm-pair
 COPY webvm-underlay.openrc /etc/init.d/webvm-underlay
 COPY webvm-hashtree.openrc /etc/init.d/webvm-hashtree
 COPY webvm-nvpn.openrc /etc/init.d/webvm-nvpn
@@ -36,7 +32,6 @@ RUN chmod 0755 \
       /usr/local/bin/nvpn \
       /usr/local/bin/htree \
       /usr/local/bin/git-remote-htree \
-      /usr/local/bin/webvm-pair \
       /usr/local/sbin/webvm-network \
       /usr/local/sbin/webvm-tun \
       /usr/local/sbin/webvm-nvpn \
@@ -44,7 +39,8 @@ RUN chmod 0755 \
       /etc/init.d/webvm-hashtree \
       /etc/init.d/webvm-nvpn \
       /etc/profile.d/webvm.sh && \
-    nvpn webvm-guest --help >/dev/null && \
+    nvpn daemon --help >/dev/null && \
+    nvpn join-request --help >/dev/null && \
     sed -i 's/getty 38400 tty1/agetty --autologin root tty1 linux/' /etc/inittab && \
     printf '%s\n' 'ttyS0::respawn:/sbin/agetty --autologin root -s ttyS0 115200 vt100' >> /etc/inittab && \
     printf 'root:\n' | chpasswd && \

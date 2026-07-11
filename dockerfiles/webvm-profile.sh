@@ -16,10 +16,11 @@ cat <<'WELCOME'
 |                                                                            |
 | A private Linux workspace running entirely in your browser.                |
 | FIPS networking and Hashtree work immediately, without a VPN login.        |
-| Pair with Nostr VPN to reach the Internet through your chosen exit node.   |
+| Download Nostr VPN (nostrvpn.org) to approve this device and add an exit.  |
 +----------------------------------------------------------------------------+
 
-  Nostr VPN pairing code: webvm-pair nvpn://invite/...
+  Nostr VPN join request:  nvpn join-request
+  FIPS and peer status:    nvpn status
   Hashtree:        htree add <path>  |  htree cat <nhash>
   Git over htree:  git clone htree://<npub>/<repo>
 

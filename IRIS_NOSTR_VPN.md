@@ -5,16 +5,16 @@ The production architecture keeps VPN policy inside the Linux guest:
 1. v86 restores a preinitialized, automatically logged-in Alpine i686 state over the same-origin content-addressed 9p image.
 2. The browser runs a generic FIPS node with virtual Ethernet and WebRTC transports and forwarding enabled.
 3. Guest FIPS uses only `eth0`; it does not open independent relay, UDP, TCP, or WebRTC transports.
-4. An admin creates the same `nvpn://invite/...` used by native nVPN clients. The guest imports it with `webvm-pair nvpn://invite/...`.
-5. Guest-side `nvpn` starts its ordinary application-level pairing flow: the join request rides over the authenticated FIPS endpoint to the invite admin.
-6. Approval sends the admin-signed nVPN roster back as application data over FIPS. No browser approval relay, special pubsub port, or FIPS protocol extension is involved.
-7. After applying the roster, guest-side `nvpn` enables the TUN and routes private/public traffic through the selected Nostr VPN exit peer.
+4. `nvpn join-request` displays the guest's stable authenticated join-request link and terminal QR; it waits for approval by default.
+5. An admin scans or pastes that request in Nostr VPN. Network invites are not part of the WebVM onboarding flow.
+6. The browser's FIPS node exposes a narrowly authorized pubsub service only to its local Ethernet guest, carrying the admin's signed approval back over routed FIPS application datagrams. This does not change the FIPS protocol or give `eth0` an IP route.
+7. The normal guest `nvpn daemon` applies the signed roster, reports the transition through `nvpn status`, and enables the TUN for private/public traffic through the selected exit peer.
 
 The shipped state is captured before Hashtree or Nostr VPN starts, so it contains no reusable guest identity. Each browser starts those services after restore and creates its own keys. There is no browser VPN identity, pairing panel, packet gateway, or fallback network path.
 
 ## Guest Tools
 
-The image includes `nvpn`, `htree`, and `git-remote-htree`. Hashtree and `.fips` services are expected to work through the browser FIPS router before VPN pairing. Run `webvm-pair nvpn://invite/...` with an invite copied from the network admin. Approval adds private routes and public Internet exit; it is not required for the FIPS underlay itself.
+The image includes `nvpn`, `htree`, and `git-remote-htree`. Hashtree and `.fips` services work through the browser FIPS router before Nostr VPN approval. Run `nvpn join-request` to show the link/QR and wait for an admin; run `nvpn status` to inspect FIPS peers. Approval adds private routes and public Internet exit, but is not required for the FIPS underlay itself.
 
 ## Build
 
