@@ -28,12 +28,6 @@ export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([
 
 export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
 
-// Stable public FIPS mesh ingress operated by Iris. WebVM dials it directly
-// instead of racing every ambient Nostr advert, which makes routing usable as
-// soon as this one authenticated WebRTC link is ready.
-export const DEFAULT_FIPS_GATEWAY_PUBKEY =
-	'02e26bce966fbed46ae16780304026fe73e059d01991501948124944ffc3778c97';
-
 function loadSecretKey() {
 	if (!globalThis.crypto?.getRandomValues) {
 		throw new Error('Secure browser randomness is unavailable');
@@ -54,7 +48,6 @@ export async function createWebvmFipsHost({
 	relayClients,
 	discoveryApp = FIPS_DEFAULT_DISCOVERY_APP,
 	stunServers = DEFAULT_FIPS_STUN_SERVERS,
-	gatewayPubkey = DEFAULT_FIPS_GATEWAY_PUBKEY,
 	logger = noopLogger,
 	onStatus = () => {},
 } = {}) {
@@ -78,11 +71,10 @@ export async function createWebvmFipsHost({
 		relayClients: sharedRelayClients,
 		stunServers,
 		discoveryApp,
-		// The browser dials native adverts but does not advertise itself, which
-		// keeps one owner for each WebRTC offer while providing guest transit.
-		advertiseOnNostr: false,
-		autoConnect: false,
+		advertiseOnNostr: true,
+		autoConnect: true,
 		acceptConnections: true,
+		maxConnections: 3,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
 		logger,
 	});
@@ -106,32 +98,6 @@ export async function createWebvmFipsHost({
 	let webrtcPeers = 0;
 	let lastPeerError = '';
 	let lastPeerErrorWhere = '';
-	let gatewayConnected = false;
-	let gatewayAttemptRunning = false;
-	let gatewayRetryTimer;
-	let stopping = false;
-	const normalizedGatewayPubkey = gatewayPubkey?.toLowerCase() || '';
-	const scheduleGatewayConnect = (delayMs = 0) => {
-		if (!normalizedGatewayPubkey || stopping || gatewayConnected || gatewayRetryTimer) return;
-		gatewayRetryTimer = setTimeout(() => {
-			gatewayRetryTimer = undefined;
-			void connectGateway();
-		}, delayMs);
-	};
-	const connectGateway = async () => {
-		if (stopping || gatewayConnected || gatewayAttemptRunning) return;
-		gatewayAttemptRunning = true;
-		try {
-			await node.connect({ transport: 'webrtc', addr: normalizedGatewayPubkey });
-		} catch (error) {
-			lastPeerError = error instanceof Error ? error.message : String(error);
-			lastPeerErrorWhere = 'connect FIPS gateway';
-			publishStatus();
-		} finally {
-			gatewayAttemptRunning = false;
-			if (!gatewayConnected) scheduleGatewayConnect(2_000);
-		}
-	};
 	const publishStatus = (state = 'ready', error = '') => {
 		onStatus({
 			state,
@@ -157,10 +123,6 @@ export async function createWebvmFipsHost({
 		if (event?.remoteAddr?.transport === 'webrtc') {
 			if (connected) webrtcPeerKeys.add(peer);
 			else webrtcPeerKeys.delete(peer);
-			if (peer === normalizedGatewayPubkey) {
-				gatewayConnected = connected;
-				if (!connected) scheduleGatewayConnect();
-			}
 		}
 		ethernetPeers = localEthernetPeers.size;
 		webrtcPeers = webrtcPeerKeys.size;
@@ -177,7 +139,6 @@ export async function createWebvmFipsHost({
 	publishStatus('starting');
 	try {
 		await node.start();
-		scheduleGatewayConnect();
 		publishStatus();
 	} catch (error) {
 		removePeerListener?.();
@@ -196,9 +157,6 @@ export async function createWebvmFipsHost({
 		pubsub,
 		ethernetFrameStats: framePort.stats,
 		async stop() {
-			stopping = true;
-			if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
-			gatewayRetryTimer = undefined;
 			removePeerListener?.();
 			removeErrorListener?.();
 			await pubsub.stop();

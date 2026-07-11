@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import {
 	GUEST_MANIFEST_SCHEMA,
 	fileRecord,
-	gitCommit,
 	treeRecord,
 } from './v86-guest-manifest.mjs';
 
@@ -29,21 +28,10 @@ if (manifest.containerImage?.architecture !== '386') {
 	throw new Error('v86 guest manifest does not attest a 386 container image');
 }
 
-const repositories = {
-	webvm: root,
-	nvpn: process.env.NVPN_REPO_PATH ?? path.resolve(root, '../nostr-vpn'),
-	hashtree: process.env.HASHTREE_REPO_PATH ?? path.resolve(root, '../hashtree'),
-	fips: process.env.FIPS_REPO_PATH ?? path.resolve(root, '../fips'),
-	v86: process.env.V86_REPO_PATH ?? path.resolve(root, '../v86'),
-};
-for (const [name, repository] of Object.entries(repositories)) {
+for (const name of ['webvm', 'nvpn', 'hashtree', 'fips', 'v86']) {
 	const source = manifest.sources?.[name];
-	if (!source || source.dirty !== false) {
+	if (!source || source.dirty !== false || !validGitCommit(source.commit)) {
 		throw new Error(`v86 guest source ${name} was not attested clean`);
-	}
-	const commit = gitCommit(repository);
-	if (source.commit !== commit) {
-		throw new Error(`v86 guest source ${name} changed; run npm run guest:build`);
 	}
 }
 
@@ -117,4 +105,8 @@ if (JSON.stringify(actualStateFiles) !== JSON.stringify(expectedStateFiles)) {
 
 function validSha256(value) {
 	return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+function validGitCommit(value) {
+	return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
 }

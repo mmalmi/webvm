@@ -21,12 +21,13 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	const rows = terminal.locator('.xterm-rows');
 	await expect(rows).toContainText('Iris WebVM');
 	await expect(rows).toContainText('root@webvm:~#');
+	await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 
 	await terminal.click();
 	await page.keyboard.insertText(
 		'a=__WEBVM_FIRST_; b=PING_DONE__; ' +
-		'ping -c 1 -W 5 npub1uf4ua9n0hm2x4ct8sqcyqfh7w0s9n5qej9gpjjqjf9z0lsmh3jtsqyduhs.fips; ' +
-		'printf "%s%s\\n" "$a" "$b"',
+		'ping -c 1 -W 5 npub1uf4ua9n0hm2x4ct8sqcyqfh7w0s9n5qej9gpjjqjf9z0lsmh3jtsqyduhs.fips ' +
+		'&& printf "%s%s\\n" "$a" "$b"',
 	);
 	await page.keyboard.press('Enter');
 	await expect(rows).toContainText('__WEBVM_FIRST_PING_DONE__', { timeout: 30_000 });
