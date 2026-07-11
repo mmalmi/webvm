@@ -78,7 +78,7 @@ require_i386_elf "$HTREE_BINARY"
 require_i386_elf "$GIT_REMOTE_HTREE_BINARY"
 
 rm -rf "$STAGE_DIR" "$OUTPUT_DIR"
-mkdir -p "$STAGE_DIR" "$OUTPUT_DIR/rootfs"
+mkdir -p "$STAGE_DIR" "$OUTPUT_DIR/rootfs" "$OUTPUT_DIR/state"
 cp "$NVPN_BINARY" "$STAGE_DIR/nvpn"
 cp "$HTREE_BINARY" "$STAGE_DIR/htree"
 cp "$GIT_REMOTE_HTREE_BINARY" "$STAGE_DIR/git-remote-htree"

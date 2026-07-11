@@ -2,7 +2,7 @@
 
 The production architecture keeps VPN policy inside the Linux guest:
 
-1. v86 boots the same-origin Alpine i686 image from content-addressed 9p assets.
+1. v86 restores a preinitialized, automatically logged-in Alpine i686 state over the same-origin content-addressed 9p image.
 2. The browser runs a generic FIPS node with virtual Ethernet and WebRTC transports and forwarding enabled.
 3. Guest FIPS uses only `eth0`; it does not open independent relay, UDP, TCP, or WebRTC transports.
 4. Guest-side `nvpn` persists one pending join request and renders its QR/URI in the terminal.
@@ -10,7 +10,7 @@ The production architecture keeps VPN policy inside the Linux guest:
 6. Signed NIP-44 approval events target the separate request pubkey. The request secret stays inside ciphertext and is never used as a topic or filter tag.
 7. After approval, guest-side `nvpn` applies the roster and exit context, creates the TUN, and routes private/public traffic through the selected Nostr VPN exit peer.
 
-There is no browser VPN identity, pairing panel, packet gateway, or fallback network path.
+The shipped state is captured before Hashtree or Nostr VPN starts, so it contains no reusable guest identity. Each browser starts those services after restore and creates its own keys. There is no browser VPN identity, pairing panel, packet gateway, or fallback network path.
 
 ## Guest Tools
 
@@ -24,7 +24,7 @@ npm run build
 npm run test:e2e
 ```
 
-The guest builder compiles static i686 binaries and emits `fs.json` plus content-addressed zstd chunks under `custom-disk-images/v86-guest`.
+The guest builder compiles static i686 binaries, emits `fs.json` plus content-addressed zstd chunks, and captures the identity-free logged-in state under `custom-disk-images/v86-guest`. Run `npm run state:build` by itself when only the WebVM state needs to be recaptured.
 
 ## Deployment
 

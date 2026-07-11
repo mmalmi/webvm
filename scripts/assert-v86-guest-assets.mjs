@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -72,6 +72,45 @@ for (const [name, actual] of Object.entries(actualArtifacts)) {
 	if (JSON.stringify(manifest.artifacts?.[name]) !== JSON.stringify(actual)) {
 		throw new Error(`v86 guest artifact ${name} is stale or modified; run npm run guest:build`);
 	}
+}
+
+const stateDirectory = path.join(outputDirectory, 'state');
+const stateManifestPath = path.join(stateDirectory, 'manifest.json');
+let stateManifest;
+try {
+	stateManifest = JSON.parse(await readFile(stateManifestPath, 'utf8'));
+} catch {
+	throw new Error('Missing or invalid preinitialized v86 state; run npm run state:build');
+}
+const v86Package = JSON.parse(await readFile(path.join(root, 'node_modules/v86/package.json'), 'utf8'));
+const guestManifestRecord = await fileRecord(manifestPath);
+if (
+	stateManifest.schema !== 1 ||
+	stateManifest.memoryBytes !== 96 * 1024 * 1024 ||
+	stateManifest.v86Version !== v86Package.version ||
+	stateManifest.guestManifestSha256 !== guestManifestRecord.sha256 ||
+	!Array.isArray(stateManifest.chunks) ||
+	stateManifest.chunks.length === 0
+) {
+	throw new Error('Preinitialized v86 state metadata is stale; run npm run state:build');
+}
+let stateBytes = 0;
+for (const [index, chunk] of stateManifest.chunks.entries()) {
+	const expectedFile = `state-${String(index).padStart(3, '0')}.bin`;
+	if (chunk.file !== expectedFile) throw new Error('Preinitialized v86 state chunks are unordered');
+	const actual = await fileRecord(path.join(stateDirectory, chunk.file));
+	if (actual.bytes !== chunk.bytes || actual.sha256 !== chunk.sha256) {
+		throw new Error(`Preinitialized v86 state chunk ${chunk.file} is stale or modified`);
+	}
+	stateBytes += actual.bytes;
+}
+if (stateBytes !== stateManifest.bytes) {
+	throw new Error('Preinitialized v86 state size is inconsistent');
+}
+const expectedStateFiles = ['manifest.json', ...stateManifest.chunks.map((chunk) => chunk.file)].sort();
+const actualStateFiles = (await readdir(stateDirectory)).sort();
+if (JSON.stringify(actualStateFiles) !== JSON.stringify(expectedStateFiles)) {
+	throw new Error('Preinitialized v86 state directory contains unexpected files');
 }
 
 function validSha256(value) {

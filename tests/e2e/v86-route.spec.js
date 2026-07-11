@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
 
 import { createV86EthernetFramePort } from '../../src/lib/v86EthernetFramePort.js';
 
@@ -11,10 +12,12 @@ function installMockV86(page) {
 			hostStopped: false,
 			listeners: {},
 			options: null,
+			serialSends: [],
 		};
 		window.irisWebvmV86TestHooks = {
 			createV86(options) {
 				window.__v86RouteTestState.options = {
+					autostart: options.autostart,
 					wasm_path: options.wasm_path,
 					memory_size: options.memory_size,
 					biosUrl: options.bios?.url,
@@ -48,6 +51,15 @@ function installMockV86(page) {
 							});
 						},
 					},
+					run() {
+						window.__v86RouteTestState.ran = true;
+					},
+					serial0_send(text) {
+						window.__v86RouteTestState.serialSends.push(text);
+					},
+					restore_state(state) {
+						window.__v86RouteTestState.restoredState = Array.from(new Uint8Array(state));
+					},
 					destroy() {
 						window.__v86RouteTestState.destroyed = true;
 					},
@@ -79,7 +91,7 @@ function installMockV86(page) {
 
 test('v86 boots only same-origin guest assets and starts the generic FIPS host', async ({ page }) => {
 	await installMockV86(page);
-	await page.goto('/v86');
+	await page.goto('/v86?cold-boot');
 
 	await expect(page.getByTestId('v86-route')).toBeVisible();
 	await expect(page.getByTestId('v86-fips-state')).toContainText('FIPS connected');
@@ -88,8 +100,9 @@ test('v86 boots only same-origin guest assets and starts the generic FIPS host',
 
 	await expect.poll(() => page.evaluate(() => window.__v86RouteTestState.options))
 		.toMatchObject({
+			autostart: false,
 			wasm_path: '/v86/v86.wasm',
-			memory_size: 256 * 1024 * 1024,
+			memory_size: 96 * 1024 * 1024,
 			biosUrl: '/v86/seabios.bin',
 			vgaBiosUrl: '/v86/vgabios.bin',
 			bzimageInitrdFromFilesystem: true,
@@ -109,6 +122,74 @@ test('v86 boots only same-origin guest assets and starts the generic FIPS host',
 	expect(state.options.bzimage).toBeUndefined();
 	expect(state.options.cmdline).toContain('root=host9p');
 	expect(state.hostCalls).toEqual([{ sameEmulator: true }]);
+	expect(state.ran).toBe(true);
+});
+
+test('v86 presents one WebVM-style terminal and never reveals cold-boot output', async ({ page }) => {
+	await installMockV86(page);
+	await page.goto('/v86?cold-boot');
+
+	const terminal = page.getByTestId('v86-serial');
+	await expect(terminal.locator('.xterm-rows')).toContainText('A private Linux workspace');
+	await expect(page.locator('header')).toBeHidden();
+	await expect(page.getByTestId('v86-screen')).not.toBeInViewport();
+	const bounds = await terminal.boundingBox();
+	expect(bounds).toMatchObject({ x: 0, y: 0 });
+	expect(bounds.width).toBe(1280);
+	expect(bounds.height).toBe(720);
+
+	await page.evaluate(() => {
+		const output = [
+			'Linux version 6.12.95 booting...\r\n',
+			'+----------------------------------------------------------------------------+\r\n',
+			'| Iris WebVM                                                                |\r\n',
+			'(none):~# ',
+		].join('');
+		for (const character of output) {
+			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
+				listener(character.charCodeAt(0));
+			}
+		}
+	});
+	await expect.poll(() => page.evaluate(
+		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-hashtree start')),
+	)).toBe(true);
+	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
+
+	await page.evaluate(() => {
+		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\n(none):~# ') {
+			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
+				listener(character.charCodeAt(0));
+			}
+		}
+	});
+	await expect(terminal.locator('.xterm-rows')).toContainText('(none):~#');
+	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
+});
+
+test('v86 restores the preinitialized logged-in environment before starting guest services', async ({ page }) => {
+	const state = Buffer.from([1, 3, 3, 7]);
+	await page.route('**/v86/guest/state/manifest.json', (route) => route.fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify({
+			schema: 1,
+			bytes: state.length,
+			chunks: [{
+				file: 'state-000.bin',
+				bytes: state.length,
+				sha256: createHash('sha256').update(state).digest('hex'),
+			}],
+		}),
+	}));
+	await page.route('**/v86/guest/state/state-000.bin', (route) => route.fulfill({ body: state }));
+	await installMockV86(page);
+	await page.goto('/v86');
+
+	await expect.poll(() => page.evaluate(() => window.__v86RouteTestState.restoredState))
+		.toEqual([...state]);
+	await expect.poll(() => page.evaluate(
+		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-hashtree start')),
+	)).toBe(true);
 });
 
 test('v86 frame port carries complete Ethernet frames in both directions', () => {

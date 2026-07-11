@@ -5,7 +5,8 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "node scripts/assert-v86-guest-assets.mjs && vite build",
-		"guest:build": "bash scripts/build-v86-guest.sh",
+		"guest:build": "bash scripts/build-v86-guest.sh && npm run state:build",
+		"state:build": "node scripts/build-v86-state.mjs",
 		"preview": "vite preview --host 127.0.0.1",
 		"test:e2e": "npm run build && playwright test",
 		"test:production": "playwright test --config playwright.production.config.js",

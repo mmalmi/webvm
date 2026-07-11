@@ -10,15 +10,40 @@
 	const V86_WASM_URL = '/v86/v86.wasm';
 	const GUEST_FS_URL = '/v86/guest/fs.json';
 	const GUEST_ROOTFS_URL = '/v86/guest/rootfs/';
+	const GUEST_STATE_MANIFEST_URL = '/v86/guest/state/manifest.json';
 	const SERIAL_BUFFER_LIMIT = 128 * 1024;
+	const WELCOME_BORDER = '+----------------------------------------------------------------------------+';
+	const RESUME_READY_MARKER = '__IRIS_WEBVM_RESUMED__';
+	const INTRO_TEXT = `${WELCOME_BORDER}
+| Iris WebVM                                                                |
+|                                                                            |
+| A private Linux workspace running entirely in your browser.                |
+| FIPS networking and Hashtree work immediately, without a VPN login.        |
+| Pair with Nostr VPN to reach the Internet through your chosen exit node.   |
+${WELCOME_BORDER}
+
+  Pair Nostr VPN:  webvm-pair
+  Hashtree:        htree add <path>  |  htree cat <nhash>
+  Git over htree:  git clone htree://<npub>/<repo>
+
+  Private names:   <npub>.fips
+  Hashtree sites:  <nhash>.iris.localhost
+                   <site>.<npub>.iris.localhost
+
+`;
 
 	let destroyed = false;
 	let screenContainer;
 	let serialConsole;
 	let serialTerminal = null;
+	let serialFitAddon = null;
 	let serialInputDisposable = null;
+	let serialResizeObserver = null;
 	let emulator = null;
 	let fipsHost = null;
+	let terminalReady = false;
+	let startupOutput = '';
+	let resumeRequested = false;
 	let vmState = 'loading';
 	let vmSummary = 'Loading WebVM';
 	let vmError = '';
@@ -72,31 +97,123 @@
 				if (serialText.length > SERIAL_BUFFER_LIMIT) {
 					serialText = serialText.slice(-SERIAL_BUFFER_LIMIT);
 				}
-				serialTerminal?.write(text);
+				if (terminalReady) {
+					serialTerminal?.write(text);
+					return;
+				}
+
+				startupOutput += text;
+				if (startupOutput.length > SERIAL_BUFFER_LIMIT) {
+					startupOutput = startupOutput.slice(-SERIAL_BUFFER_LIMIT);
+				}
+				const markerIndex = startupOutput.indexOf(RESUME_READY_MARKER);
+				if (markerIndex < 0) {
+					if (
+						!resumeRequested &&
+						startupOutput.includes(WELCOME_BORDER) &&
+						/[\w()-]+:~[#$]\s/.test(startupOutput)
+					) {
+						requestGuestResume(instance);
+					}
+					return;
+				}
+
+				terminalReady = true;
+				serialTerminal?.reset();
+				serialTerminal?.write(INTRO_TEXT);
+				const resumedOutput = startupOutput
+					.slice(markerIndex + RESUME_READY_MARKER.length)
+					.replace(/^\r?\n/, '');
+				serialTerminal?.write(resumedOutput);
+				startupOutput = '';
+				serialTerminal?.focus();
+				publishDebugState();
 			}),
 		];
 	}
 
 	async function initializeSerialTerminal() {
 		const { Terminal } = await import('@xterm/xterm');
+		const { FitAddon } = await import('@xterm/addon-fit');
 		if (destroyed) return;
 		serialTerminal = new Terminal({
-			cols: 120,
-			rows: 32,
 			convertEol: true,
 			cursorBlink: true,
-			fontFamily: 'Menlo, Monaco, Consolas, monospace',
-			fontSize: 12,
+			fontFamily: 'monospace',
+			fontSize: 16,
 			letterSpacing: 0,
 			scrollback: 5_000,
 			theme: {
-				background: '#020617',
-				foreground: '#d1fae5',
+				background: '#000000',
+				foreground: '#f4f4f5',
 			},
 		});
+		serialFitAddon = new FitAddon();
+		serialTerminal.loadAddon(serialFitAddon);
 		serialTerminal.open(serialConsole);
-		serialInputDisposable = serialTerminal.onData((data) => emulator?.serial0_send?.(data));
+		serialFitAddon.fit();
+		serialTerminal.write(INTRO_TEXT);
+		serialInputDisposable = serialTerminal.onData((data) => {
+			if (terminalReady) emulator?.serial0_send?.(data);
+		});
+		serialResizeObserver = new ResizeObserver(() => {
+			if (serialConsole?.dataset.e2eStyle !== undefined) return;
+			serialFitAddon?.fit();
+		});
+		serialResizeObserver.observe(serialConsole);
 		publishDebugState();
+	}
+
+	function requestGuestResume(instance) {
+		if (resumeRequested) return;
+		resumeRequested = true;
+		const snapshotBuild = new URLSearchParams(globalThis.location.search).has('snapshot-build');
+		setTimeout(() => {
+			instance.serial0_send?.(
+				(snapshotBuild ? '' :
+					`rc-service webvm-hashtree start >/dev/null 2>&1; ` +
+					`rc-service webvm-nvpn start >/dev/null 2>&1; `) +
+				`printf '\\n${RESUME_READY_MARKER}\\n'\n`,
+			);
+		}, 50);
+	}
+
+	async function sha256Hex(bytes) {
+		const digest = await crypto.subtle.digest('SHA-256', bytes);
+		return [...new Uint8Array(digest)]
+			.map((byte) => byte.toString(16).padStart(2, '0'))
+			.join('');
+	}
+
+	async function loadPreinitializedState() {
+		if (new URLSearchParams(globalThis.location.search).has('cold-boot')) return null;
+		const manifestResponse = await fetch(GUEST_STATE_MANIFEST_URL);
+		if (manifestResponse.status === 404) return null;
+		if (!manifestResponse.ok) {
+			throw new Error(`Failed to load WebVM state manifest (${manifestResponse.status})`);
+		}
+		const manifest = await manifestResponse.json();
+		if (manifest.schema !== 1 || !Array.isArray(manifest.chunks) || manifest.chunks.length === 0) {
+			throw new Error('Invalid WebVM state manifest');
+		}
+		const chunks = await Promise.all(manifest.chunks.map(async (chunk) => {
+			const response = await fetch(new URL(chunk.file, manifestResponse.url));
+			if (!response.ok) throw new Error(`Failed to load WebVM state chunk ${chunk.file}`);
+			const bytes = await response.arrayBuffer();
+			if (bytes.byteLength !== chunk.bytes || await sha256Hex(bytes) !== chunk.sha256) {
+				throw new Error(`WebVM state chunk ${chunk.file} failed integrity verification`);
+			}
+			return new Uint8Array(bytes);
+		}));
+		const totalBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+		if (totalBytes !== manifest.bytes) throw new Error('WebVM state size does not match its manifest');
+		const state = new Uint8Array(totalBytes);
+		let offset = 0;
+		for (const chunk of chunks) {
+			state.set(chunk, offset);
+			offset += chunk.byteLength;
+		}
+		return state.buffer;
 	}
 
 	function getTestHooks() {
@@ -132,11 +249,15 @@
 		vmSummary = 'Loading WebVM';
 		vmError = '';
 		const rawSerialConsole = document.createElement('textarea');
+		const statePromise = loadPreinitializedState().catch((error) => {
+			console.error('Preinitialized WebVM state is unavailable; using a cold boot', error);
+			return null;
+		});
 		const options = {
 			wasm_path: V86_WASM_URL,
-			memory_size: 256 * 1024 * 1024,
+			memory_size: 96 * 1024 * 1024,
 			vga_memory_size: 8 * 1024 * 1024,
-			autostart: true,
+			autostart: false,
 			fastboot: true,
 			disable_speaker: true,
 			bios: { url: BIOS_URL },
@@ -166,6 +287,9 @@
 				return;
 			}
 			emulator = instance;
+			const emulatorReady = new Promise((resolve) => {
+				instance.add_listener?.('emulator-ready', resolve);
+			});
 			installEmulatorListeners(instance);
 			vmState = 'created';
 			vmSummary = 'WebVM initialized';
@@ -179,6 +303,17 @@
 					error: messageFromError(error),
 				};
 				publishDebugState();
+			}
+
+			const state = await statePromise;
+			await emulatorReady;
+			if (destroyed) return;
+			if (state && instance.restore_state) {
+				await instance.restore_state(state);
+				instance.run?.();
+				requestGuestResume(instance);
+			} else {
+				instance.run?.();
 			}
 		} catch (error) {
 			vmState = 'load-failed';
@@ -199,6 +334,7 @@
 				vmSummary,
 				vmError,
 				fipsStatus,
+				terminalReady,
 			}),
 		};
 	}
@@ -214,6 +350,9 @@
 		removeEmulatorListeners = [];
 		serialInputDisposable?.dispose?.();
 		serialInputDisposable = null;
+		serialResizeObserver?.disconnect?.();
+		serialResizeObserver = null;
+		serialFitAddon = null;
 		serialTerminal?.dispose?.();
 		serialTerminal = null;
 		void fipsHost?.stop?.();
@@ -226,49 +365,46 @@
 	<title>Iris WebVM</title>
 </svelte:head>
 
-<main data-testid="v86-route" class="min-h-screen bg-neutral-950 px-3 py-3 text-gray-100 sm:px-5 sm:py-5">
-	<section class="mx-auto flex min-h-[calc(100vh-1.5rem)] max-w-[100rem] flex-col overflow-hidden rounded-md border border-neutral-800 bg-black sm:min-h-[calc(100vh-2.5rem)]">
-		<header class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-3">
-			<div>
-				<h1 class="text-base font-semibold">Iris WebVM</h1>
-				<div data-testid="v86-status" class="mt-1 text-xs text-gray-400">{vmSummary}</div>
-			</div>
-			<div class="text-right text-xs">
-				<div data-testid="v86-fips-state" class:text-emerald-300={fipsStatus.state === 'ready'} class:text-red-300={fipsStatus.state === 'failed' || fipsStatus.state === 'error'}>
-					{fipsStatus.state === 'ready' ? 'FIPS connected' : `FIPS ${fipsStatus.state}`}
-				</div>
-				{#if fipsStatus.ethernetPeers || fipsStatus.webrtcPeers}
-					<div class="mt-1 text-gray-500">Ethernet {fipsStatus.ethernetPeers} · WebRTC {fipsStatus.webrtcPeers}</div>
-				{/if}
-			</div>
-		</header>
+<main data-testid="v86-route" class="relative h-screen w-screen overflow-hidden bg-black text-gray-100">
+	<header class="hidden">
+		<h1>Iris WebVM</h1>
+		<div data-testid="v86-status">{vmSummary}</div>
+		<div data-testid="v86-fips-state">
+			{fipsStatus.state === 'ready' ? 'FIPS connected' : `FIPS ${fipsStatus.state}`}
+		</div>
+		<div>Ethernet {fipsStatus.ethernetPeers} · WebRTC {fipsStatus.webrtcPeers}</div>
+	</header>
 
-		{#if vmError || fipsStatus.error}
-			<div data-testid="v86-error" class="border-b border-red-950 bg-red-950/40 px-4 py-2 text-xs text-red-200">
-				{vmError || fipsStatus.error}
-			</div>
-		{/if}
+	{#if vmError || fipsStatus.error}
+		<div data-testid="v86-error" class="sr-only">{vmError || fipsStatus.error}</div>
+	{/if}
 
-		<div bind:this={screenContainer} data-testid="v86-screen" class="v86-screen min-h-[32rem] flex-1 bg-black"></div>
-
-		<div
-			bind:this={serialConsole}
-			data-testid="v86-serial"
-			class="h-48 w-full border-t border-neutral-800 bg-neutral-950 p-2"
-			role="application"
-			aria-label="WebVM serial console"
-		></div>
-	</section>
+	<div bind:this={screenContainer} data-testid="v86-screen" class="v86-screen" aria-hidden="true"></div>
+	<div
+		bind:this={serialConsole}
+		data-testid="v86-serial"
+		class="absolute inset-0 bg-black p-1"
+		role="application"
+		aria-label="Iris WebVM terminal"
+	></div>
 </main>
 
 <style>
-	.v86-screen :global(canvas) {
-		display: block;
-		max-width: 100%;
+	:global(.xterm) {
+		height: 100%;
 	}
 
-	.v86-screen :global(div) {
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-		white-space: pre;
+	.v86-screen :global(canvas) {
+		display: block;
+	}
+
+	.v86-screen {
+		position: fixed;
+		top: 0;
+		left: -10000px;
+		width: 640px;
+		height: 480px;
+		overflow: hidden;
+		pointer-events: none;
 	}
 </style>

@@ -58,8 +58,6 @@ RUN chmod 0755 \
     for service in devfs dmesg mdev hwdrivers; do rc-update add "$service" sysinit; done && \
     for service in hwclock modules sysctl hostname syslog bootmisc; do rc-update add "$service" boot; done && \
     rc-update add webvm-underlay default && \
-    rc-update add webvm-hashtree default && \
-    rc-update add webvm-nvpn default && \
     rc-update add killprocs shutdown && \
     kernel_release=$(cat /usr/share/kernel/virt/kernel.release) && \
     mkinitfs -F 'base virtio 9p' "$kernel_release" && \

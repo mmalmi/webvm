@@ -26,7 +26,8 @@ export default defineConfig({
 				{ src: 'node_modules/v86/build/v86.wasm', dest: 'v86' },
 				{ src: 'node_modules/v86/build/v86-fallback.wasm', dest: 'v86' },
 				{ src: 'custom-disk-images/v86-guest/fs.json', dest: 'v86/guest' },
-				{ src: 'custom-disk-images/v86-guest/rootfs', dest: 'v86/guest' }
+				{ src: 'custom-disk-images/v86-guest/rootfs', dest: 'v86/guest' },
+				{ src: 'custom-disk-images/v86-guest/state', dest: 'v86/guest' }
 			]
 		})
 	]

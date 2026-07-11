@@ -22,7 +22,7 @@ WebVM is powered by the **CheerpX** virtualization engine, which provides:
 
 ## Iris WebVM
 
-This fork boots an Alpine i686 guest with v86 and a same-origin, content-addressed root filesystem. The browser runs a generic FIPS router between the v86 Ethernet device and FIPS WebRTC peers. Nostr VPN identity, QR pairing, approval, TUN configuration, and exit-node policy belong to `nvpn` inside the guest. There is no browser-side VPN management panel or alternate networking path. See [IRIS_NOSTR_VPN.md](IRIS_NOSTR_VPN.md).
+This fork restores a preinitialized, logged-in Alpine i686 guest with v86 and a same-origin, content-addressed root filesystem. The browser runs a generic FIPS router between the v86 Ethernet device and FIPS WebRTC peers. Nostr VPN identity, QR pairing, approval, TUN configuration, and exit-node policy belong to `nvpn` inside the guest. Guest identities are created per browser after restore and are not stored in the shipped state. There is no browser-side VPN management panel or alternate networking path. See [IRIS_NOSTR_VPN.md](IRIS_NOSTR_VPN.md).
 
 ## Table of Contents
 
