@@ -175,18 +175,15 @@ async function decodeQr(screenshot) {
 }
 
 async function startAndScanJoinRequest(page) {
-	const endMarker = '__NVPN_JOIN_REQUEST_ACCEPTED__';
-	await page.evaluate((marker) => {
+	await page.evaluate(() => {
 		const terminal = globalThis.irisWebvmV86.serialTerminal;
 		const consoleElement = document.querySelector('[data-testid="v86-serial"]');
 		Object.assign(consoleElement.style, { width: '1440px', height: '1240px' });
 		terminal.resize(150, 76);
 		terminal.reset();
 		globalThis.__nvpnJoinE2eSerial.text = '';
-		globalThis.__nvpnJoinE2eSerial.emulator.serial0_send(
-			`nvpn join-request; printf '\\n${marker}\\n'\n`,
-		);
-	}, endMarker);
+		globalThis.__nvpnJoinE2eSerial.emulator.serial0_send('nvpn join-request\n');
+	});
 	await waitUntil(
 		() => page.evaluate(() => (
 			globalThis.__nvpnJoinE2eSerial?.text || ''
@@ -232,7 +229,6 @@ async function startAndScanJoinRequest(page) {
 	});
 	return {
 		request: await decodeQr(await normalizeQrScreenshot(page, screenshot, geometry.verticalScale)),
-		endMarker,
 	};
 }
 
@@ -249,14 +245,14 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
 			{ timeoutMs: 120_000, message: 'WebVM did not attach to browser FIPS' },
 		);
-		const { request, endMarker } = await startAndScanJoinRequest(page);
+		const { request } = await startAndScanJoinRequest(page);
 		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/);
 		const imported = await admin.approve(request);
 		expect(imported.participantAdded).toBe(true);
 		await waitUntil(
-			() => page.evaluate((marker) => (
+			() => page.evaluate(() => (
 				globalThis.__nvpnJoinE2eSerial?.text || ''
-			).includes(marker), endMarker),
+			).includes('Join approved for network')),
 			{ timeoutMs: 120_000, message: 'WebVM did not observe admin approval' },
 		);
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);

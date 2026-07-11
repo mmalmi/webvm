@@ -8,6 +8,7 @@ export WEBVM_PROFILE_STARTED=1
 export HTREE_CONFIG_DIR=${HTREE_CONFIG_DIR:-/var/lib/hashtree/config}
 export HTREE_DATA_DIR=${HTREE_DATA_DIR:-/var/lib/hashtree/data}
 export HTREE_LOCAL_DAEMON_ONLY=1
+export NVPN_CONFIG_PATH=${NVPN_CONFIG_PATH:-/var/lib/nvpn/config.toml}
 
 cat <<'WELCOME'
 
