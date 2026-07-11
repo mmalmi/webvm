@@ -170,6 +170,7 @@ ${WELCOME_BORDER}
 		const snapshotBuild = new URLSearchParams(globalThis.location.search).has('snapshot-build');
 		setTimeout(() => {
 			instance.serial0_send?.(
+				`stty echo; ` +
 				(snapshotBuild ? '' :
 					`rc-service webvm-hashtree start >/dev/null 2>&1; ` +
 					`rc-service webvm-nvpn start >/dev/null 2>&1; `) +

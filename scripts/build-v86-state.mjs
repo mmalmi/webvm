@@ -78,7 +78,7 @@ async function captureState(downloadPath) {
 				"test ! -e /var/lib/hashtree/config/keys && " +
 				"test ! -e /var/lib/hashtree/config/auth.cookie && " +
 				"test -z \"$(find /var/lib/nvpn /var/lib/hashtree/data -type f -print -quit)\" && " +
-				"sync && echo 3 > /proc/sys/vm/drop_caches && " +
+				"sync && echo 3 > /proc/sys/vm/drop_caches && stty echo && " +
 				"printf '__IRIS_SNAPSHOT_%s__\\n' READY\n",
 			);
 		});
