@@ -84,7 +84,8 @@ async function captureState(downloadPath) {
 				"dd if=/dev/zero of=/run/webvm-snapshot-scrub/zero bs=1M count=36 >/dev/null 2>&1 && " +
 				"rm /run/webvm-snapshot-scrub/zero && " +
 				"umount /run/webvm-snapshot-scrub && rmdir /run/webvm-snapshot-scrub && " +
-				"sync && echo 3 > /proc/sys/vm/drop_caches && stty echo && " +
+				"sync && echo 3 > /proc/sys/vm/drop_caches && " +
+				"history -c 2>/dev/null; rm -f /root/.ash_history; stty echo; " +
 				"printf '__IRIS_SNAPSHOT_%s__\\n' READY\n",
 			);
 		});

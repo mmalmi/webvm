@@ -1,7 +1,9 @@
 <script>
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount } from 'svelte';
+	import VmToolbar from '$lib/VmToolbar.svelte';
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
+	import { attachWebvmDisk } from '$lib/webvmDisk.js';
 	import '$lib/global.css';
 	import '@xterm/xterm/css/xterm.css';
 
@@ -10,10 +12,12 @@
 	const V86_WASM_URL = '/v86/v86.wasm';
 	const GUEST_FS_URL = '/v86/guest/fs.json';
 	const GUEST_ROOTFS_URL = '/v86/guest/rootfs/';
+	const GUEST_MANIFEST_URL = '/v86/guest/manifest.json';
 	const GUEST_STATE_MANIFEST_URL = '/v86/guest/state/manifest.json';
 	const SERIAL_BUFFER_LIMIT = 128 * 1024;
 	const WELCOME_BORDER = '+----------------------------------------------------------------------------+';
 	const RESUME_READY_MARKER = '__IRIS_WEBVM_RESUMED__';
+	const STARTUP_STATUS_TEXT = 'Starting Linux...\r\n';
 	const INTRO_TEXT = `${WELCOME_BORDER}
 | Iris WebVM                                                                |
 |                                                                            |
@@ -41,6 +45,9 @@ ${WELCOME_BORDER}
 	let serialInputDisposable = null;
 	let serialResizeObserver = null;
 	let emulator = null;
+	let diskController = null;
+	let diskStatus = 'loading';
+	let resettingVm = false;
 	let fipsHost = null;
 	let terminalReady = false;
 	let startupOutput = '';
@@ -155,7 +162,7 @@ ${WELCOME_BORDER}
 		serialTerminal.loadAddon(serialFitAddon);
 		serialTerminal.open(serialConsole);
 		serialFitAddon.fit();
-		serialTerminal.write(INTRO_TEXT);
+		serialTerminal.write(`${INTRO_TEXT}${STARTUP_STATUS_TEXT}`);
 		serialInputDisposable = serialTerminal.onData((data) => {
 			if (terminalReady) emulator?.serial0_send?.(data);
 		});
@@ -186,6 +193,7 @@ ${WELCOME_BORDER}
 					`grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf && break; ` +
 					`sleep 0.1; done; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
+				`history -c 2>/dev/null; rm -f /root/.ash_history; ` +
 				`printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED\n`,
 			);
 		}, 50);
@@ -227,6 +235,38 @@ ${WELCOME_BORDER}
 			offset += chunk.byteLength;
 		}
 		return state.buffer;
+	}
+
+	async function diskCompatibilityId() {
+		const response = await fetch(GUEST_MANIFEST_URL);
+		if (!response.ok) throw new Error(`Failed to load WebVM guest manifest (${response.status})`);
+		const manifest = await response.json();
+		const rootfsHash = manifest.artifacts?.rootfs?.sha256;
+		if (!rootfsHash) throw new Error('WebVM guest manifest has no root filesystem identity');
+		return `${manifest.schema}:${rootfsHash}`;
+	}
+
+	async function attachPersistentDisk(instance) {
+		try {
+			diskController = await attachWebvmDisk({
+				compatibilityId: await diskCompatibilityId(),
+				filesystem: instance.fs9p,
+				onStatus(status) {
+					diskStatus = status;
+				},
+			});
+		} catch (error) {
+			console.error('Failed to initialize the WebVM local disk', error);
+			diskStatus = 'unavailable';
+		}
+	}
+
+	async function resetVm() {
+		if (resettingVm || !confirm('Delete this browser\'s saved WebVM disk and start clean?')) return;
+		resettingVm = true;
+		diskStatus = 'resetting';
+		await diskController?.reset();
+		globalThis.location.reload();
 	}
 
 	function getTestHooks() {
@@ -324,11 +364,10 @@ ${WELCOME_BORDER}
 			if (destroyed) return;
 			if (state && instance.restore_state) {
 				await instance.restore_state(state);
-				instance.run?.();
-				requestGuestResume(instance);
-			} else {
-				instance.run?.();
 			}
+			await attachPersistentDisk(instance);
+			instance.run?.();
+			if (state) requestGuestResume(instance);
 		} catch (error) {
 			vmState = 'load-failed';
 			vmError = messageFromError(error);
@@ -369,6 +408,8 @@ ${WELCOME_BORDER}
 		serialFitAddon = null;
 		serialTerminal?.dispose?.();
 		serialTerminal = null;
+		diskController?.dispose();
+		diskController = null;
 		void fipsHost?.stop?.();
 		void emulator?.destroy?.();
 		if (localDiagnosticsEnabled()) delete globalThis.irisWebvmV86;
@@ -401,6 +442,7 @@ ${WELCOME_BORDER}
 		role="application"
 		aria-label="Iris WebVM terminal"
 	></div>
+	<VmToolbar {diskStatus} resetting={resettingVm} onReset={resetVm} />
 </main>
 
 <style>
@@ -421,4 +463,5 @@ ${WELCOME_BORDER}
 		overflow: hidden;
 		pointer-events: none;
 	}
+
 </style>
