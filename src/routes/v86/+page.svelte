@@ -2,7 +2,6 @@
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount } from 'svelte';
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
-	import { preloadV86GuestFile } from '$lib/v86GuestPreload.js';
 	import '$lib/global.css';
 	import '@xterm/xterm/css/xterm.css';
 
@@ -264,11 +263,6 @@ ${WELCOME_BORDER}
 		vmSummary = 'Loading WebVM';
 		vmError = '';
 		const rawSerialConsole = document.createElement('textarea');
-		void preloadV86GuestFile({
-			filesystemUrl: GUEST_FS_URL,
-			rootfsUrl: GUEST_ROOTFS_URL,
-			guestPath: '/usr/local/bin/nvpn',
-		}).catch(() => {});
 		const statePromise = loadPreinitializedState().catch((error) => {
 			console.error('Preinitialized WebVM state is unavailable; using a cold boot', error);
 			return null;
