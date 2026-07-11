@@ -167,29 +167,34 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 		}
 	});
 	await expect.poll(() => page.evaluate(
-		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-hashtree start')),
+		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-nvpn start')),
 	)).toBe(true);
 	const resumeCommand = await page.evaluate(() => window.__v86RouteTestState.serialSends.find(
-		(text) => text.includes('webvm-hashtree start'),
+		(text) => text.includes('webvm-nvpn start'),
 	));
-	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start;");
-	expect(resumeCommand).toContain("webvm-nvpn start) >/dev/null 2>&1 &'");
+	expect(resumeCommand).toContain("hostname webvm; export PS1='root@webvm:\\w# '");
+	expect(resumeCommand).toContain("sh -c '(rc-service webvm-nvpn start >/dev/null 2>&1 &");
+	expect(resumeCommand).toContain('grep -q "^# Managed by nvpn webvm-guest$" /etc/resolv.conf');
+	expect(resumeCommand).toContain("rc-service webvm-hashtree start >/dev/null 2>&1) &'");
 	expect(resumeCommand).toMatch(
 		/^stty echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p > \/dev\/urandom; /,
 	);
 	expect(resumeCommand.indexOf('/dev/urandom')).toBeLessThan(
+		resumeCommand.indexOf('rc-service webvm-nvpn start'),
+	);
+	expect(resumeCommand.indexOf('rc-service webvm-nvpn start')).toBeLessThan(
 		resumeCommand.indexOf('rc-service webvm-hashtree start'),
 	);
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 
 	await page.evaluate(() => {
-		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\n(none):~# ') {
+		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\nroot@webvm:~# ') {
 			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
 				listener(character.charCodeAt(0));
 			}
 		}
 	});
-	await expect(terminal.locator('.xterm-rows')).toContainText('(none):~#');
+	await expect(terminal.locator('.xterm-rows')).toContainText('root@webvm:~#');
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 });
 
@@ -210,7 +215,7 @@ test('v86 preserves commands entered before the resumed shell is ready', async (
 	)).toBe(false);
 
 	await page.evaluate(() => {
-		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\n(none):~# ') {
+		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\nroot@webvm:~# ') {
 			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
 				listener(character.charCodeAt(0));
 			}
@@ -248,11 +253,11 @@ test('v86 restores the preinitialized logged-in environment before starting gues
 	await expect.poll(() => page.evaluate(() => window.__v86RouteTestState.restoredState))
 		.toEqual([...state]);
 	await expect.poll(() => page.evaluate(
-		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-hashtree start')),
+		() => window.__v86RouteTestState.serialSends.some((text) => text.includes('webvm-nvpn start')),
 	)).toBe(true);
 	await page.evaluate(() => {
 		const commandEcho = window.__v86RouteTestState.serialSends.find(
-			(text) => text.includes('webvm-hashtree start'),
+			(text) => text.includes('webvm-nvpn start'),
 		);
 		for (const character of commandEcho) {
 			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
@@ -262,14 +267,14 @@ test('v86 restores the preinitialized logged-in environment before starting gues
 	});
 	expect(await page.evaluate(() => globalThis.irisWebvmV86.state().terminalReady)).toBe(false);
 	await page.evaluate(() => {
-		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\n(none):~# ') {
+		for (const character of '\r\n__IRIS_WEBVM_RESUMED__\r\nroot@webvm:~# ') {
 			for (const listener of window.__v86RouteTestState.listeners['serial0-output-byte'] || []) {
 				listener(character.charCodeAt(0));
 			}
 		}
 	});
 	const terminalText = page.getByTestId('v86-serial').locator('.xterm-rows');
-	await expect(terminalText).toContainText('(none):~#');
+	await expect(terminalText).toContainText('root@webvm:~#');
 	await expect(terminalText).not.toContainText('__IRIS_WEBVM_RESUMED__');
 	await expect(terminalText).not.toContainText('rc-service webvm-hashtree');
 });

@@ -10,7 +10,7 @@ depend() {
 
 start() {
     ebegin "Preparing WebVM FIPS Ethernet underlay"
-    /usr/local/sbin/webvm-network
+    /usr/local/sbin/webvm-network && /usr/local/sbin/webvm-tun
     eend $?
 }
 

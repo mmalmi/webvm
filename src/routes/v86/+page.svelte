@@ -186,9 +186,13 @@ ${WELCOME_BORDER}
 		setTimeout(() => {
 			instance.serial0_send?.(
 				`stty echo; printf '%s' '${entropyHex}' | xxd -r -p > /dev/urandom; ` +
+				`hostname webvm; export PS1='root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
-					`sh -c '(rc-service webvm-hashtree start; ` +
-					`rc-service webvm-nvpn start) >/dev/null 2>&1 &'; `) +
+					`sh -c '(rc-service webvm-nvpn start >/dev/null 2>&1 & ` +
+					`for attempt in $(seq 1 50); do ` +
+					`grep -q "^# Managed by nvpn webvm-guest$" /etc/resolv.conf && break; ` +
+					`sleep 0.1; done; ` +
+					`rc-service webvm-hashtree start >/dev/null 2>&1) &'; `) +
 				`printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED\n`,
 			);
 		}, 50);
