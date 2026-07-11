@@ -126,11 +126,12 @@ ${WELCOME_BORDER}
 					return;
 				}
 
-				serialTerminal?.reset();
-				serialTerminal?.write(INTRO_TEXT);
 				const resumedOutput = startupOutput
 					.slice(markerIndex + RESUME_READY_MARKER.length)
 					.replace(/^\r?\n/, '');
+				if (!resumedOutput.includes('root@webvm:~# ')) return;
+				serialTerminal?.reset();
+				serialTerminal?.write(INTRO_TEXT);
 				serialTerminal?.write(resumedOutput);
 				startupOutput = '';
 				terminalReady = true;
@@ -193,8 +194,7 @@ ${WELCOME_BORDER}
 					`grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf && break; ` +
 					`sleep 0.1; done; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
-				`history -c 2>/dev/null; rm -f /root/.ash_history; ` +
-				`printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED\n`,
+				`exec /bin/ash -c "printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED; exec /bin/ash"\n`,
 			);
 		}, 50);
 	}

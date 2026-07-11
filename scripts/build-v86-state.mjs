@@ -85,8 +85,8 @@ async function captureState(downloadPath) {
 				"rm /run/webvm-snapshot-scrub/zero && " +
 				"umount /run/webvm-snapshot-scrub && rmdir /run/webvm-snapshot-scrub && " +
 				"sync && echo 3 > /proc/sys/vm/drop_caches && " +
-				"history -c 2>/dev/null; rm -f /root/.ash_history; stty echo; " +
-				"printf '__IRIS_SNAPSHOT_%s__\\n' READY\n",
+				"rm -f /root/.ash_history; stty echo; " +
+				"exec /bin/ash -c \"printf '__IRIS_SNAPSHOT_%s__\\n' READY; exec /bin/ash\"\n",
 			);
 		});
 		await page.waitForFunction(
@@ -94,8 +94,11 @@ async function captureState(downloadPath) {
 				const terminal = globalThis.irisWebvmV86?.serialTerminal;
 				const buffer = terminal?.buffer?.active;
 				if (!buffer) return false;
+				let markerSeen = false;
 				for (let row = Math.max(0, buffer.length - 40); row < buffer.length; row += 1) {
-					if (buffer.getLine(row)?.translateToString(true).includes(marker)) return true;
+					const line = buffer.getLine(row)?.translateToString(true) || '';
+					if (line.includes(marker)) markerSeen = true;
+					else if (markerSeen && line.includes('root@webvm:~#')) return true;
 				}
 				return false;
 			},

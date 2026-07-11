@@ -199,7 +199,9 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'");
 	expect(resumeCommand).toContain('grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf');
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'");
-	expect(resumeCommand).toContain('history -c 2>/dev/null; rm -f /root/.ash_history');
+	expect(resumeCommand).toContain(
+		`exec /bin/ash -c "printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED; exec /bin/ash"`,
+	);
 	expect(resumeCommand).toMatch(
 		/^stty echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p > \/dev\/urandom; /,
 	);
