@@ -174,6 +174,12 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	));
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start;");
 	expect(resumeCommand).toContain("webvm-nvpn start) >/dev/null 2>&1 &'");
+	expect(resumeCommand).toMatch(
+		/^stty echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p > \/dev\/urandom; /,
+	);
+	expect(resumeCommand.indexOf('/dev/urandom')).toBeLessThan(
+		resumeCommand.indexOf('rc-service webvm-hashtree start'),
+	);
 	await expect(terminal.locator('.xterm-rows')).not.toContainText('Linux version');
 
 	await page.evaluate(() => {

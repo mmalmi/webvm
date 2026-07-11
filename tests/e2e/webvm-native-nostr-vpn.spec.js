@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { nip19 } from 'nostr-tools';
 import { readBarcodes } from 'zxing-wasm/reader';
@@ -39,6 +40,19 @@ function requireRealFile(envName, { executable = false } = {}) {
 		throw new Error(`${envName} is not executable`);
 	}
 	return resolved;
+}
+
+function createIsolatedHostConfig(sourcePath) {
+	const directory = mkdtempSync(path.join(tmpdir(), 'iris-webvm-nvpn-e2e-'));
+	const configPath = path.join(directory, 'config.toml');
+	copyFileSync(sourcePath, configPath);
+	chmodSync(configPath, 0o600);
+	return {
+		configPath,
+		cleanup() {
+			rmSync(directory, { recursive: true, force: true });
+		},
+	};
 }
 
 function readHostPeerDiagnostics(nvpnBin, configPath, participantPubkey) {
@@ -727,8 +741,10 @@ async function assertStableGuestFmpLinks(page) {
 
 test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over nvpn0', async ({ page }) => {
 	test.setTimeout(420_000);
-	const configPath = requireRealFile(HOST_CONFIG_ENV);
+	const hostConfigPath = requireRealFile(HOST_CONFIG_ENV);
 	const nvpnBin = requireRealFile(NVPN_BIN_ENV, { executable: true });
+	const isolatedHostConfig = createIsolatedHostConfig(hostConfigPath);
+	const { configPath } = isolatedHostConfig;
 	let native;
 	let joinRequest = '';
 	let guestParticipantPubkey = '';
@@ -914,6 +930,8 @@ test('real WebVM guest auto-pairs through NativeAppAction and reaches HTTPS over
 			await native?.cleanup();
 		} catch (cleanupError) {
 			if (!testFailure) throw cleanupError;
+		} finally {
+			isolatedHostConfig.cleanup();
 		}
 	}
 });

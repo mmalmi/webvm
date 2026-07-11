@@ -168,9 +168,13 @@ ${WELCOME_BORDER}
 		if (resumeRequested) return;
 		resumeRequested = true;
 		const snapshotBuild = new URLSearchParams(globalThis.location.search).has('snapshot-build');
+		const entropy = crypto.getRandomValues(new Uint8Array(64));
+		const entropyHex = [...entropy]
+			.map((byte) => byte.toString(16).padStart(2, '0'))
+			.join('');
 		setTimeout(() => {
 			instance.serial0_send?.(
-				`stty echo; ` +
+				`stty echo; printf '%s' '${entropyHex}' | xxd -r -p > /dev/urandom; ` +
 				(snapshotBuild ? '' :
 					`sh -c '(rc-service webvm-hashtree start; ` +
 					`rc-service webvm-nvpn start) >/dev/null 2>&1 &'; `) +
@@ -238,6 +242,7 @@ ${WELCOME_BORDER}
 		const createHost = hook || createWebvmFipsHost;
 		fipsHost = await createHost({
 			emulator: instance,
+			logger: localDiagnosticsEnabled() ? console : undefined,
 			onStatus(status) {
 				fipsStatus = status;
 				publishDebugState();

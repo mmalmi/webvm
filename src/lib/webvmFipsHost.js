@@ -28,6 +28,12 @@ export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([
 
 export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
 
+// Stable public FIPS mesh ingress operated by Iris. WebVM dials it directly
+// instead of racing every ambient Nostr advert, which makes routing usable as
+// soon as this one authenticated WebRTC link is ready.
+export const DEFAULT_FIPS_GATEWAY_PUBKEY =
+	'02e26bce966fbed46ae16780304026fe73e059d01991501948124944ffc3778c97';
+
 function loadSecretKey() {
 	if (!globalThis.crypto?.getRandomValues) {
 		throw new Error('Secure browser randomness is unavailable');
@@ -48,6 +54,7 @@ export async function createWebvmFipsHost({
 	relayClients,
 	discoveryApp = FIPS_DEFAULT_DISCOVERY_APP,
 	stunServers = DEFAULT_FIPS_STUN_SERVERS,
+	gatewayPubkey = DEFAULT_FIPS_GATEWAY_PUBKEY,
 	logger = noopLogger,
 	onStatus = () => {},
 } = {}) {
@@ -74,7 +81,7 @@ export async function createWebvmFipsHost({
 		// The browser dials native adverts but does not advertise itself, which
 		// keeps one owner for each WebRTC offer while providing guest transit.
 		advertiseOnNostr: false,
-		autoConnect: true,
+		autoConnect: false,
 		acceptConnections: true,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
 		logger,
@@ -140,6 +147,13 @@ export async function createWebvmFipsHost({
 	publishStatus('starting');
 	try {
 		await node.start();
+		if (gatewayPubkey) {
+			void node.connect({ transport: 'webrtc', addr: gatewayPubkey }).catch((error) => {
+				lastPeerError = error instanceof Error ? error.message : String(error);
+				lastPeerErrorWhere = 'connect FIPS gateway';
+				publishStatus();
+			});
+		}
 		publishStatus();
 	} catch (error) {
 		removePeerListener?.();
