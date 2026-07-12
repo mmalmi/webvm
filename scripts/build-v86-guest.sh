@@ -42,6 +42,7 @@ else
   (
     cd "$NVPN_REPO"
     NVPN_FIPS_REPO_PATH=${NVPN_FIPS_REPO_PATH:-$FIPS_REPO} \
+      NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES=${NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES:-1} \
       scripts/build-nvpn-linux-musl "$TARGET"
   )
   NVPN_BINARY=${NVPN_LINUX_MUSL_TARGET_DIR:-$NVPN_REPO/target}/$TARGET/release/nvpn
