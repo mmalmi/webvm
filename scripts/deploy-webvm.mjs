@@ -113,16 +113,16 @@ async function main() {
 	}
 
 	if (options.dryRun) {
-		console.log('Build WebVM: npm run build');
+		console.log('Gate WebVM release: npm run test:release');
 		console.log(`Deploy WebVM Worker: npx ${deployCommand.join(' ')}`);
 		console.log(JSON.stringify(config, null, 2));
 		return;
 	}
 
 	try {
-		const buildStatus = await run('npm', ['run', 'build'], appDir);
-		if (buildStatus !== 0) {
-			process.exitCode = buildStatus;
+		const gateStatus = await run('npm', ['run', 'test:release'], appDir);
+		if (gateStatus !== 0) {
+			process.exitCode = gateStatus;
 			return;
 		}
 

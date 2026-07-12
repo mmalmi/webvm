@@ -12,8 +12,10 @@ test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real join-req
 test.use({ trace: 'off', viewport: { width: 1600, height: 1400 }, deviceScaleFactor: 2 });
 
 function nvpnBinary() {
+	const installedAppBinary = '/Applications/Nostr VPN.app/Contents/Resources/nvpn';
 	const binary = path.resolve(
 		process.env.NVPN_WEBVM_NVPN_BIN?.trim()
+			|| (existsSync(installedAppBinary) ? installedAppBinary : '')
 			|| path.join(process.cwd(), '../nostr-vpn/target/debug/nvpn'),
 	);
 	if (!existsSync(binary) || !statSync(binary).isFile()) {
@@ -247,13 +249,41 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 		);
 		const { request } = await startAndScanJoinRequest(page);
 		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/);
+		const approvalStartedAt = Date.now();
+		const deliveryTimeline = [];
+		let lastDeliveryState = '';
+		const captureDeliveryState = async () => {
+			const state = await page.evaluate(() => {
+				const stats = globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats || {};
+				return {
+					approvalSeen: (globalThis.__nvpnJoinE2eSerial?.text || '')
+						.includes('Join approved for network'),
+					activeSubscriptions:
+						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activeSubscriptionCount?.(),
+					pendingReplies:
+						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
+					relayEvents: stats.relayEvents,
+					relaySubscriptions: stats.relaySubscriptions,
+					relaySubscriptionFailures: stats.relaySubscriptionFailures,
+					serviceErrors: stats.serviceErrors,
+				};
+			});
+			const comparable = JSON.stringify(state);
+			if (comparable !== lastDeliveryState) {
+				lastDeliveryState = comparable;
+				const sample = { elapsedMs: Date.now() - approvalStartedAt, ...state };
+				deliveryTimeline.push(sample);
+				console.log(`native approval delivery state ${JSON.stringify(sample)}`);
+			}
+			return state.approvalSeen;
+		};
+		const beforeApproval = await captureDeliveryState();
+		expect(beforeApproval.relayEvents).toBe(0);
 		const imported = await admin.approve(request);
 		expect(imported.participantAdded).toBe(true);
 		try {
 			await waitUntil(
-				() => page.evaluate(() => (
-					globalThis.__nvpnJoinE2eSerial?.text || ''
-				).includes('Join approved for network')),
+				captureDeliveryState,
 				{ timeoutMs: 120_000, message: 'WebVM did not observe admin approval' },
 			);
 		} catch (error) {
@@ -293,6 +323,10 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
 		expect(guestOutput).toContain('Join approved for network');
 		expect(guestOutput).not.toContain('ping: bad address');
+		const approvalLatencyMs = Date.now() - approvalStartedAt;
+		console.log(`native approval reached WebVM in ${approvalLatencyMs}ms`);
+		console.log(`native approval delivery timeline ${JSON.stringify(deliveryTimeline)}`);
+		expect(approvalLatencyMs).toBeLessThanOrEqual(5_000);
 		await admin.cleanup();
 	} finally {
 		admin.stop();

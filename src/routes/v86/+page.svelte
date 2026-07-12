@@ -187,7 +187,7 @@ ${WELCOME_BORDER}
 			.join('');
 		setTimeout(() => {
 			instance.serial0_send?.(
-				`stty -echo; printf '%s' '${entropyHex}' | xxd -r -p > /dev/urandom; ` +
+				`stty -echo; printf '%s' '${entropyHex}' | xxd -r -p | webvm-seed-rng; ` +
 				`hostname webvm; export PS1='root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +

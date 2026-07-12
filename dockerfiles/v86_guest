@@ -1,3 +1,9 @@
+FROM i386/alpine:3.22@sha256:934f9c1fd4821fb1ba834a9f6b7ff6be379af70dec156e7e59c2f8e716632e65 AS webvm-tools
+
+RUN apk add --no-cache build-base
+COPY webvm-seed-rng.c /tmp/webvm-seed-rng.c
+RUN cc -Os -static -Wall -Wextra -Werror -o /webvm-seed-rng /tmp/webvm-seed-rng.c
+
 FROM i386/alpine:3.22@sha256:934f9c1fd4821fb1ba834a9f6b7ff6be379af70dec156e7e59c2f8e716632e65
 
 ENV KERNEL=virt
@@ -19,6 +25,7 @@ RUN apk add --no-cache \
 COPY nvpn /usr/local/bin/nvpn
 COPY htree /usr/local/bin/htree
 COPY git-remote-htree /usr/local/bin/git-remote-htree
+COPY --from=webvm-tools /webvm-seed-rng /usr/local/sbin/webvm-seed-rng
 COPY webvm-profile.sh /etc/profile.d/webvm.sh
 COPY webvm-network.sh /usr/local/sbin/webvm-network
 COPY webvm-tun.sh /usr/local/sbin/webvm-tun
@@ -32,6 +39,7 @@ RUN chmod 0755 \
       /usr/local/bin/nvpn \
       /usr/local/bin/htree \
       /usr/local/bin/git-remote-htree \
+	  /usr/local/sbin/webvm-seed-rng \
       /usr/local/sbin/webvm-network \
       /usr/local/sbin/webvm-tun \
       /usr/local/sbin/webvm-nvpn \

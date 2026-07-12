@@ -210,9 +210,9 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 		`exec /bin/ash -c "printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED; exec /bin/ash"`,
 	);
 	expect(resumeCommand).toMatch(
-		/^stty -echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p > \/dev\/urandom; /,
+		/^stty -echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p \| webvm-seed-rng; /,
 	);
-	expect(resumeCommand.indexOf('/dev/urandom')).toBeLessThan(
+	expect(resumeCommand.indexOf('webvm-seed-rng')).toBeLessThan(
 		resumeCommand.indexOf('rc-service webvm-nvpn start'),
 	);
 	expect(resumeCommand.indexOf('rc-service webvm-nvpn start')).toBeLessThan(
