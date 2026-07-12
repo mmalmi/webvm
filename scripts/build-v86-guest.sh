@@ -7,6 +7,7 @@ HASHTREE_REPO=${HASHTREE_REPO_PATH:-$ROOT/../hashtree}
 FIPS_REPO=${FIPS_REPO_PATH:-$ROOT/../fips}
 V86_REPO=${V86_REPO_PATH:-$ROOT/../v86}
 TARGET=i686-unknown-linux-musl
+NVPN_TARGET_DIR=${NVPN_LINUX_MUSL_TARGET_DIR:-$HOME/.cache/cargo-target/nvpn-webvm}
 HTREE_TARGET_DIR=${HTREE_TARGET_DIR:-${CARGO_TARGET_DIR:-$HOME/.cache/cargo-target}}
 OUTPUT_DIR=${V86_GUEST_OUTPUT_DIR:-$ROOT/custom-disk-images/v86-guest}
 STAGE_DIR=$(mktemp -d "$ROOT/custom-disk-images/.v86-guest-stage.XXXXXX")
@@ -42,11 +43,12 @@ else
   (
     cd "$NVPN_REPO"
     NVPN_FIPS_REPO_PATH=${NVPN_FIPS_REPO_PATH:-$FIPS_REPO} \
+      NVPN_LINUX_MUSL_TARGET_DIR="$NVPN_TARGET_DIR" \
       NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES=${NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES:-1} \
       NVPN_LINUX_MUSL_STRIP=${NVPN_LINUX_MUSL_STRIP:-1} \
       scripts/build-nvpn-linux-musl "$TARGET"
   )
-  NVPN_BINARY=${NVPN_LINUX_MUSL_TARGET_DIR:-$NVPN_REPO/target}/$TARGET/release/nvpn
+  NVPN_BINARY=$NVPN_TARGET_DIR/$TARGET/release/nvpn
 fi
 
 if [[ -n ${HTREE_BINARY:-} ]]; then
