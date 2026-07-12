@@ -78,6 +78,7 @@ export async function createWebvmFipsHost({
 		acceptConnections: true,
 		maxConnections: 3,
 		connectTimeoutMs: 12_000,
+		iceGatherTimeoutMs: 2_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
 		logger,
 	});
