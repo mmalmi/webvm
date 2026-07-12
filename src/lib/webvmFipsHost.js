@@ -71,10 +71,13 @@ export async function createWebvmFipsHost({
 		relayClients: sharedRelayClients,
 		stunServers,
 		discoveryApp,
-		advertiseOnNostr: true,
+		// WebVM identities are ephemeral leaves. They discover durable ingress
+		// adverts but do not leave stale browser-presence adverts after reloads.
+		advertiseOnNostr: false,
 		autoConnect: true,
 		acceptConnections: true,
 		maxConnections: 3,
+		connectTimeoutMs: 12_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
 		logger,
 	});
