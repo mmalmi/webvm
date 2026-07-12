@@ -187,7 +187,7 @@ ${WELCOME_BORDER}
 			.join('');
 		setTimeout(() => {
 			instance.serial0_send?.(
-				`stty echo; printf '%s' '${entropyHex}' | xxd -r -p > /dev/urandom; ` +
+				`stty -echo; printf '%s' '${entropyHex}' | xxd -r -p > /dev/urandom; ` +
 				`hostname webvm; export PS1='root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
@@ -195,6 +195,7 @@ ${WELCOME_BORDER}
 					`grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf && break; ` +
 					`sleep 0.1; done; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
+				`history -c 2>/dev/null; rm -f /root/.ash_history; stty echo; ` +
 				`exec /bin/ash -c "printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED; exec /bin/ash"\n`,
 			);
 		}, 50);

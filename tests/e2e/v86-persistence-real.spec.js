@@ -52,6 +52,12 @@ test('real v86 starts with clean history and persists files until reset', async 
 	await waitForTerminal(page);
 	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk');
 
+	const terminal = page.getByTestId('v86-serial');
+	await terminal.click();
+	await page.keyboard.press('ArrowUp');
+	await expect.poll(() => terminalText(page)).not.toContain('rc-service webvm-nvpn start');
+	await page.keyboard.press('Control+C');
+
 	await runCommand(page, 'history', '__HISTORY_CHECKED__');
 	const history = await terminalText(page);
 	expect(history).not.toContain('webvm-snapshot-scrub');
