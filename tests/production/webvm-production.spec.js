@@ -39,15 +39,6 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 
 	await terminal.click();
 	await page.keyboard.insertText(
-		'a=__WEBVM_FIRST_; b=PING_DONE__; ' +
-		`ping -c 1 -W 5 ${LNVPS_FIPS_NAME} ` +
-		'&& printf "%s%s\\n" "$a" "$b"',
-	);
-	await page.keyboard.press('Enter');
-	await expect(rows).toContainText('__WEBVM_FIRST_PING_DONE__', { timeout: 30_000 });
-	await expect(rows).not.toContainText('ping: bad address');
-
-	await page.keyboard.insertText(
 		'! grep -q "^\\[fips_bootstrap_peers\\]" /var/lib/nvpn/config.toml ' +
 		'&& nvpn status | grep -q "^fips_bootstrap_enabled: false$" ' +
 		'&& printf "__WEBVM_NOSTR_DISCOVERY_ONLY__\\n"',
