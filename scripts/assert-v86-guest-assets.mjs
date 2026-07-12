@@ -49,6 +49,9 @@ for (const [name, binary] of Object.entries(manifest.binaries ?? {})) {
 if (Object.keys(manifest.binaries ?? {}).sort().join(',') !== 'gitRemoteHtree,htree,nvpn') {
 	throw new Error('v86 guest manifest has an incomplete binary set');
 }
+if (manifest.binaries.nvpn.bytes > 55 * 1024 * 1024) {
+	throw new Error('WebVM nVPN binary includes features outside the minimal guest profile');
+}
 
 const actualArtifacts = {
 	fsJson: await fileRecord(path.join(outputDirectory, 'fs.json')),
