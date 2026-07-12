@@ -11,10 +11,16 @@ const CROSS_ORIGIN_HEADERS = {
 	'X-Frame-Options': 'DENY',
 };
 
-function withWebVmHeaders(response) {
+const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const CONTENT_ADDRESSED_ROOTFS_PATH = /^\/v86\/guest\/rootfs\/[0-9a-f]{8}\.bin\.zst$/u;
+
+function withWebVmHeaders(response, url) {
 	const headers = new Headers(response.headers);
 	for (const [name, value] of Object.entries(CROSS_ORIGIN_HEADERS)) {
 		headers.set(name, value);
+	}
+	if (CONTENT_ADDRESSED_ROOTFS_PATH.test(url.pathname)) {
+		headers.set('Cache-Control', IMMUTABLE_CACHE_CONTROL);
 	}
 
 	return new Response(response.body, {
@@ -45,6 +51,6 @@ export default {
 		}
 
 		const response = await env.ASSETS.fetch(request);
-		return withWebVmHeaders(response);
+		return withWebVmHeaders(response, url);
 	},
 };

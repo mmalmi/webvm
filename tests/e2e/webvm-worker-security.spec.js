@@ -34,3 +34,23 @@ test('WebVM Worker isolates the privileged VM origin', async () => {
 	expect(csp).not.toContain('plausible.leaningtech.com');
 	expect(await response.text()).toContain(appCsp);
 });
+
+test('WebVM Worker caches content-addressed rootfs chunks without revalidation', async () => {
+	const defaultCacheControl = 'public, max-age=0, must-revalidate';
+	const assets = {
+		fetch: () => new Response('asset', {
+			headers: { 'cache-control': defaultCacheControl },
+		}),
+	};
+	const chunk = await worker.fetch(
+		new Request('https://webvm.iris.to/v86/guest/rootfs/98d1f850.bin.zst'),
+		{ ASSETS: assets },
+	);
+	const manifest = await worker.fetch(
+		new Request('https://webvm.iris.to/v86/guest/fs.json'),
+		{ ASSETS: assets },
+	);
+
+	expect(chunk.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+	expect(manifest.headers.get('cache-control')).toBe(defaultCacheControl);
+});

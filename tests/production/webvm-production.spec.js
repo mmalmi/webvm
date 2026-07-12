@@ -3,6 +3,17 @@ import { expect, test } from '@playwright/test';
 const LNVPS_FIPS_NAME =
 	'npub1uf4ua9n0hm2x4ct8sqcyqfh7w0s9n5qej9gpjjqjf9z0lsmh3jtsqyduhs.fips';
 
+test('deployed WebVM serves content-addressed rootfs chunks as immutable', async ({ request }) => {
+	const filesystem = await request.get('/v86/guest/fs.json');
+	expect(filesystem.status()).toBe(200);
+	const chunkName = (await filesystem.text()).match(/[0-9a-f]{8}\.bin\.zst/u)?.[0];
+	expect(chunkName).toBeTruthy();
+
+	const chunk = await request.head(`/v86/guest/rootfs/${chunkName}`);
+	expect(chunk.status()).toBe(200);
+	expect(chunk.headers()['cache-control']).toBe('public, max-age=31536000, immutable');
+});
+
 test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ page, request }) => {
 	const httpResponse = await request.get('http://webvm.iris.to/v86', { maxRedirects: 0 });
 	expect(httpResponse.status()).toBe(308);

@@ -9,6 +9,7 @@
 		"guest:build": "bash scripts/build-v86-guest.sh && npm run state:build",
 		"state:build": "node scripts/build-v86-state.mjs",
 		"preview": "vite preview --host 127.0.0.1",
+		"perf:startup": "node scripts/measure-v86-startup.mjs",
 		"test:e2e": "npm run build && playwright test",
 		"test:production": "playwright test --config playwright.production.config.js",
 		"deploy:webvm": "node scripts/deploy-webvm.mjs",
