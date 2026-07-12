@@ -13,10 +13,11 @@ test.use({ trace: 'off', viewport: { width: 1600, height: 1400 }, deviceScaleFac
 
 function nvpnBinary() {
 	const installedAppBinary = '/Applications/Nostr VPN.app/Contents/Resources/nvpn';
+	const sourceBinary = path.join(process.cwd(), '../nostr-vpn/target/debug/nvpn');
 	const binary = path.resolve(
 		process.env.NVPN_WEBVM_NVPN_BIN?.trim()
-			|| (existsSync(installedAppBinary) ? installedAppBinary : '')
-			|| path.join(process.cwd(), '../nostr-vpn/target/debug/nvpn'),
+			|| (existsSync(sourceBinary) ? sourceBinary : '')
+			|| installedAppBinary,
 	);
 	if (!existsSync(binary) || !statSync(binary).isFile()) {
 		throw new Error(`nVPN binary is unavailable: ${binary}`);
@@ -234,7 +235,7 @@ async function startAndScanJoinRequest(page) {
 	};
 }
 
-test('admin scans WebVM join-request QR and WebVM observes signed approval', async ({ page }) => {
+test('admin approval reaches WebVM directly over FIPS without relay traffic', async ({ page }) => {
 	test.setTimeout(300_000);
 	const nvpn = nvpnBinary();
 	const isolated = createIsolatedAdmin(nvpn);
@@ -262,6 +263,7 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activeSubscriptionCount?.(),
 					pendingReplies:
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
+					subscriptionBatches: stats.subscriptionBatches,
 					relayEvents: stats.relayEvents,
 					relaySubscriptions: stats.relaySubscriptions,
 					relaySubscriptionFailures: stats.relaySubscriptionFailures,
@@ -275,15 +277,18 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 				deliveryTimeline.push(sample);
 				console.log(`native approval delivery state ${JSON.stringify(sample)}`);
 			}
-			return state.approvalSeen;
+			return state;
 		};
 		const beforeApproval = await captureDeliveryState();
-		expect(beforeApproval.relayEvents).toBe(0);
+		expect(beforeApproval.approvalSeen).toBe(false);
+		expect(beforeApproval.subscriptionBatches ?? 0).toBe(0);
+		expect(beforeApproval.relayEvents ?? 0).toBe(0);
+		expect(beforeApproval.relaySubscriptions ?? 0).toBe(0);
 		const imported = await admin.approve(request);
 		expect(imported.participantAdded).toBe(true);
 		try {
 			await waitUntil(
-				captureDeliveryState,
+				async () => (await captureDeliveryState()).approvalSeen,
 				{ timeoutMs: 120_000, message: 'WebVM did not observe admin approval' },
 			);
 		} catch (error) {
@@ -324,9 +329,13 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 		expect(guestOutput).toContain('Join approved for network');
 		expect(guestOutput).not.toContain('ping: bad address');
 		const approvalLatencyMs = Date.now() - approvalStartedAt;
+		const afterApproval = await captureDeliveryState();
 		console.log(`native approval reached WebVM in ${approvalLatencyMs}ms`);
 		console.log(`native approval delivery timeline ${JSON.stringify(deliveryTimeline)}`);
 		expect(approvalLatencyMs).toBeLessThanOrEqual(5_000);
+		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
+		expect(afterApproval.relayEvents ?? 0).toBe(0);
+		expect(afterApproval.relaySubscriptions ?? 0).toBe(0);
 		await admin.cleanup();
 	} finally {
 		admin.stop();
