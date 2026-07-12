@@ -195,7 +195,10 @@ ${WELCOME_BORDER}
 					`grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf && break; ` +
 					`sleep 0.1; done; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
-				`history -c 2>/dev/null; rm -f /root/.ash_history; stty echo; ` +
+				`{ sed '$d' /root/.ash_history 2>/dev/null || true; } ` +
+				`> /root/.ash_history.iris-resume; history -c 2>/dev/null; ` +
+				`mv /root/.ash_history.iris-resume /root/.ash_history; ` +
+				`chmod 600 /root/.ash_history; stty echo; ` +
 				`exec /bin/ash -c "printf '\\n__IRIS_WEBVM_%s__\\n' RESUMED; exec /bin/ash"\n`,
 			);
 		}, 50);

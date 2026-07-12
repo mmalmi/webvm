@@ -249,12 +249,47 @@ test('admin scans WebVM join-request QR and WebVM observes signed approval', asy
 		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/);
 		const imported = await admin.approve(request);
 		expect(imported.participantAdded).toBe(true);
-		await waitUntil(
-			() => page.evaluate(() => (
-				globalThis.__nvpnJoinE2eSerial?.text || ''
-			).includes('Join approved for network')),
-			{ timeoutMs: 120_000, message: 'WebVM did not observe admin approval' },
-		);
+		try {
+			await waitUntil(
+				() => page.evaluate(() => (
+					globalThis.__nvpnJoinE2eSerial?.text || ''
+				).includes('Join approved for network')),
+				{ timeoutMs: 120_000, message: 'WebVM did not observe admin approval' },
+			);
+		} catch (error) {
+			const diagnostics = await page.evaluate(() => ({
+				fips: globalThis.irisWebvmV86?.state?.().fipsStatus,
+				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
+			}));
+			await page.evaluate(() => {
+				globalThis.__nvpnJoinE2eSerial.emulator.serial0_send('\u0003');
+			});
+			await waitUntil(
+				() => page.evaluate(() => {
+					const text = globalThis.__nvpnJoinE2eSerial?.text || '';
+					const stopped = text.lastIndexOf('Stopped waiting');
+					return stopped >= 0 && text.indexOf('root@webvm:~#', stopped) > stopped;
+				}),
+				{ timeoutMs: 10_000, message: 'WebVM join command did not stop' },
+			);
+			await page.evaluate(() => {
+				globalThis.__nvpnJoinE2eSerial.text = '';
+				globalThis.__nvpnJoinE2eSerial.emulator.serial0_send(
+					'rc-service webvm-nvpn stop >/dev/null; tail -n 120 /var/log/webvm-nvpn.log; printf "\\n__NVPN_GUEST_LOG__\\n"\n',
+				);
+			});
+			await waitUntil(
+				() => page.evaluate(() => (
+					(globalThis.__nvpnJoinE2eSerial?.text || '')
+						.match(/__NVPN_GUEST_LOG__/g)?.length || 0
+				) >= 2),
+				{ timeoutMs: 10_000, message: 'WebVM guest log did not render' },
+			);
+			const guestLog = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text.slice(-16_000));
+			throw new Error(
+				`${error.message}: ${JSON.stringify(diagnostics)}\nGuest log:\n${guestLog}`,
+			);
+		}
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
 		expect(guestOutput).toContain('Join approved for network');
 		expect(guestOutput).not.toContain('ping: bad address');

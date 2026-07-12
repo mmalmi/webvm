@@ -45,7 +45,7 @@ async function savedDiskExists(page) {
 	});
 }
 
-test('real v86 starts with clean history and persists files until reset', async ({ page }) => {
+test('real v86 preserves user history and files across refresh until reset', async ({ page }) => {
 	await page.goto('/v86');
 	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
 		.toContainText('Starting FIPS networking...');
@@ -68,6 +68,7 @@ test('real v86 starts with clean history and persists files until reset', async 
 		"printf 'browser-local-data\\n' > /root/webvm-persistence-check",
 		'__FILE_WRITTEN__',
 	);
+	await runCommand(page, 'echo user-history-survives-refresh', '__USER_HISTORY_WRITTEN__');
 	await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
 	await expect.poll(() => savedDiskExists(page), { timeout: 15_000 }).toBe(true);
 
@@ -75,6 +76,10 @@ test('real v86 starts with clean history and persists files until reset', async 
 	await waitForTerminal(page);
 	await runCommand(page, 'cat /root/webvm-persistence-check', '__FILE_RESTORED__');
 	await expect.poll(() => terminalText(page)).toContain('browser-local-data');
+	await runCommand(page, 'history', '__HISTORY_RESTORED__');
+	const restoredHistory = await terminalText(page);
+	expect(restoredHistory).toContain('echo user-history-survives-refresh');
+	expect(restoredHistory).not.toContain('rc-service webvm-nvpn start');
 
 	page.once('dialog', (dialog) => dialog.accept());
 	await Promise.all([
