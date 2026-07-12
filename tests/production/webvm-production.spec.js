@@ -101,3 +101,40 @@ test('deployed WebVM handles a concurrent Nostr-discovered WebRTC burst', async 
 		await Promise.all(contexts.map((context) => context.close()));
 	}
 });
+
+test('five fresh WebVMs deliver their first FIPS ping without resolver or session loss', async ({
+	browser,
+}) => {
+	test.setTimeout(300_000);
+	const baseURL = process.env.WEBVM_PRODUCTION_URL || 'https://webvm.iris.to';
+	const localHeaders = baseURL.startsWith('http://')
+		? { 'x-forwarded-proto': 'https' }
+		: undefined;
+
+	for (let attempt = 1; attempt <= 5; attempt += 1) {
+		const startedAt = Date.now();
+		const context = await browser.newContext({ extraHTTPHeaders: localHeaders });
+		try {
+			const page = await context.newPage();
+			const response = await page.goto(`${baseURL}/v86`);
+			expect(response?.status()).toBe(200);
+			await expect(page.getByTestId('v86-fips-state')).toHaveText('FIPS connected');
+			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
+			const terminal = page.getByTestId('v86-serial');
+			const rows = terminal.locator('.xterm-rows');
+			await expect(rows).toContainText('root@webvm:~#');
+
+			const marker = `__WEBVM_FRESH_FIRST_PING_${attempt}_OK__`;
+			await terminal.click();
+			await page.keyboard.insertText(
+				`ping -c 1 -W 8 ${LNVPS_FIPS_NAME} >/dev/null && printf '${marker}\\n'`,
+			);
+			await page.keyboard.press('Enter');
+			await expect(rows).toContainText(marker, { timeout: 30_000 });
+			await expect(rows).not.toContainText('ping: bad address');
+			console.log(`fresh first ping ${attempt}/5 passed in ${Date.now() - startedAt}ms`);
+		} finally {
+			await context.close();
+		}
+	}
+});
