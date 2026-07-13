@@ -12,6 +12,7 @@ const config = {
 				'base-uri': ['none'],
 				'connect-src': [
 					'self',
+					'stun:',
 					'wss://temp.iris.to',
 					'wss://relay.damus.io',
 					'wss://nos.lol'

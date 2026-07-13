@@ -30,6 +30,8 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	expect(headers['content-security-policy']).toBe("frame-ancestors 'none'");
 	expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
 
+	await expect(page.locator('meta[http-equiv="content-security-policy"]'))
+		.toHaveAttribute('content', /connect-src[^;]*\bstun:/u);
 	await expect(page.getByTestId('v86-route')).toBeVisible();
 	await expect(page.getByTestId('v86-fips-state')).toHaveText('FIPS connected');
 	await expect(page.getByTestId('v86-status')).toContainText(/WebVM (loaded|ready|running)/);

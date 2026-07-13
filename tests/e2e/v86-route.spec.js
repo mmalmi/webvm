@@ -127,6 +127,8 @@ test('v86 boots only same-origin guest assets and starts the generic FIPS host',
 	await installMockV86(page);
 	await page.goto('/v86?cold-boot');
 
+	await expect(page.locator('meta[http-equiv="content-security-policy"]'))
+		.toHaveAttribute('content', /connect-src[^;]*\bstun:/u);
 	await expect(page.getByTestId('v86-route')).toBeVisible();
 	await expect(page.getByTestId('v86-fips-state')).toContainText('FIPS connected');
 	await expect(page.getByText('Pairing', { exact: true })).toHaveCount(0);
