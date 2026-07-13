@@ -41,7 +41,6 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	const rows = terminal.locator('.xterm-rows');
 	await expect(rows).toContainText('Iris WebVM');
 	await expect(rows).toContainText('root@webvm:~#');
-	await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 
 	await terminal.click();
 	await page.keyboard.insertText(
@@ -61,6 +60,7 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	);
 	await page.keyboard.press('Enter');
 	await expect(rows).toContainText('__WEBVM_FIPS_READY__', { timeout: 180_000 });
+	await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 	await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
 
 	await expect(page.getByText('Tailscale')).toHaveCount(0);
@@ -80,7 +80,6 @@ test('deployed WebVM handles a concurrent Nostr-discovered WebRTC burst', async 
 			await expect(page.getByTestId('v86-fips-state')).toHaveText('FIPS connected');
 			const rows = page.getByTestId('v86-serial').locator('.xterm-rows');
 			await expect(rows).toContainText('root@webvm:~#');
-			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 		}));
 
 		await Promise.all(pages.map(async (page, index) => {
@@ -93,6 +92,7 @@ test('deployed WebVM handles a concurrent Nostr-discovered WebRTC burst', async 
 			);
 			await page.keyboard.press('Enter');
 			await expect(rows).toContainText(marker, { timeout: 30_000 });
+			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 			await expect(rows).not.toContainText('ping: bad address');
 		}));
 	} finally {
@@ -117,7 +117,6 @@ test('five fresh WebVMs deliver their first FIPS ping without resolver or sessio
 			const response = await page.goto(`${baseURL}/v86`);
 			expect(response?.status()).toBe(200);
 			await expect(page.getByTestId('v86-fips-state')).toHaveText('FIPS connected');
-			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 			const terminal = page.getByTestId('v86-serial');
 			const rows = terminal.locator('.xterm-rows');
 			await expect(rows).toContainText('root@webvm:~#');
@@ -129,6 +128,7 @@ test('five fresh WebVMs deliver their first FIPS ping without resolver or sessio
 			);
 			await page.keyboard.press('Enter');
 			await expect(rows).toContainText(marker, { timeout: 30_000 });
+			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 			await expect(rows).not.toContainText('ping: bad address');
 			console.log(`fresh first ping ${attempt}/5 passed in ${Date.now() - startedAt}ms`);
 		} finally {

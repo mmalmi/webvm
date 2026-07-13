@@ -67,10 +67,12 @@ export async function createWebvmFipsHost({
 		// WebVM identities are ephemeral leaves. They discover durable ingress
 		// adverts but do not leave stale browser-presence adverts after reloads.
 		advertiseOnNostr: false,
-		autoConnect: true,
+		// The guest emits destination-specific FIPS lookups for its roster. Let
+		// those resolve the exact ingress instead of spending connection slots on
+		// unrelated public adverts or dead signaling relays.
+		autoConnect: false,
 		acceptConnections: true,
-		maxConnections: 4,
-		maxAutoConnections: 2,
+		maxConnections: 16,
 		connectTimeoutMs: 12_000,
 		iceGatherTimeoutMs: 2_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,

@@ -260,6 +260,12 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
 			{ timeoutMs: 120_000, message: 'WebVM did not attach to browser FIPS' },
 		);
+		expect(await page.evaluate(
+			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.autoConnect,
+		)).toBe(false);
+		expect(await page.evaluate(
+			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxConnections,
+		)).toBe(16);
 		const browserHostPublicKey = await page.evaluate(
 			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
 		);
@@ -346,6 +352,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		expect(guestOutput).not.toContain('ping: bad address');
 		const afterApproval = await captureDeliveryState();
 		await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
+		const reloadStartedAt = Date.now();
 		await page.reload();
 		await attachSerial(page);
 		await waitUntil(
@@ -389,10 +396,13 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			() => globalThis.__nvpnJoinE2eSerial.text,
 		);
 		expect(restoredGuestOutput).toContain('via mesh');
+		const restoredMeshLatencyMs = Date.now() - reloadStartedAt;
+		expect(restoredMeshLatencyMs).toBeLessThanOrEqual(20_000);
 		const afterReload = await captureDeliveryState();
 		const meshReachabilityLatencyMs = Date.now() - approvalStartedAt;
 		console.log(`native approval ACK reached WebVM in ${approvalAckLatencyMs}ms`);
 		console.log(`approved peer became reachable via mesh in ${meshReachabilityLatencyMs}ms`);
+		console.log(`restored peer became reachable via mesh in ${restoredMeshLatencyMs}ms`);
 		expect(afterApproval.directApprovalForwards).toBe(imported.directEvents);
 		expect(afterApproval.directApprovalAcks).toBeGreaterThanOrEqual(1);
 		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
