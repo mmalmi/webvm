@@ -1,5 +1,7 @@
 const DATABASE_NAME = 'iris-webvm';
 const DATABASE_VERSION = 1;
+const DISK_RECORD_SCHEMA = 2;
+const PORTABLE_FILE_PATHS = ['/root/.ash_history'];
 const RECORD_KEY = 'root-filesystem';
 const SAVE_DELAY_MS = 1_000;
 const STORE_NAME = 'disks';
@@ -73,6 +75,38 @@ function serializableFilesystemState(filesystem) {
 	return state;
 }
 
+async function readPortableFiles(filesystem) {
+	if (!filesystem?.SearchPath || !filesystem?.GetInode || !filesystem?.Read) return {};
+	const files = {};
+	for (const filePath of PORTABLE_FILE_PATHS) {
+		const location = filesystem.SearchPath(filePath);
+		if (!location || location.id < 0) continue;
+		const inode = filesystem.GetInode(location.id);
+		const data = await filesystem.Read(location.id, 0, inode.size);
+		if (data) files[filePath] = new Uint8Array(data);
+	}
+	return files;
+}
+
+async function restorePortableFiles(filesystem, files) {
+	if (!files || !filesystem?.SearchPath || !filesystem?.GetInode
+		|| !filesystem?.CreateFile || !filesystem?.ChangeSize || !filesystem?.Write) return;
+	for (const filePath of PORTABLE_FILE_PATHS) {
+		const data = files[filePath];
+		if (!(data instanceof Uint8Array)) continue;
+		let location = filesystem.SearchPath(filePath);
+		if (location.id < 0) {
+			const separator = filePath.lastIndexOf('/');
+			const parent = filesystem.SearchPath(filePath.slice(0, separator));
+			if (parent.id < 0) continue;
+			const id = filesystem.CreateFile(filePath.slice(separator + 1), parent.id);
+			location = { id };
+		}
+		await filesystem.ChangeSize(location.id, data.byteLength);
+		await filesystem.Write(location.id, 0, data.byteLength, data);
+	}
+}
+
 export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus }) {
 	if (!globalThis.indexedDB || !filesystem?.get_state || !filesystem?.set_state) {
 		onStatus?.('unavailable');
@@ -88,8 +122,11 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 
 	try {
 		const record = await loadRecord();
-		if (record?.schema === 1 && record.compatibilityId === compatibilityId) {
+		if ([1, DISK_RECORD_SCHEMA].includes(record?.schema)
+			&& record.compatibilityId === compatibilityId) {
 			filesystem.set_state(record.state);
+		} else if (record?.schema === DISK_RECORD_SCHEMA) {
+			await restorePortableFiles(filesystem, record.portableFiles);
 		}
 		void navigator.storage?.persist?.().catch(() => false);
 		await publishReadyStatus();
@@ -111,8 +148,14 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 		if (disposed || changeVersion === 0) return saveTask;
 		const version = changeVersion;
 		const state = serializableFilesystemState(filesystem);
+		const portableFiles = await readPortableFiles(filesystem);
 		saveTask = saveTask.then(async () => {
-			await saveRecord({ schema: 1, compatibilityId, state });
+			await saveRecord({
+				schema: DISK_RECORD_SCHEMA,
+				compatibilityId,
+				state,
+				portableFiles,
+			});
 			await publishReadyStatus();
 			if (changeVersion === version) changeVersion = 0;
 			else scheduleSave();
