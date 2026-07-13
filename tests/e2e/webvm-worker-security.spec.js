@@ -35,7 +35,7 @@ test('WebVM Worker isolates the privileged VM origin', async () => {
 	expect(await response.text()).toContain(appCsp);
 });
 
-test('WebVM Worker caches content-addressed rootfs chunks without revalidation', async () => {
+test('WebVM Worker bypasses the browser cache while caching rootfs chunks at the edge', async () => {
 	const defaultCacheControl = 'public, max-age=0, must-revalidate';
 	const assets = {
 		fetch: () => new Response('asset', {
@@ -51,6 +51,8 @@ test('WebVM Worker caches content-addressed rootfs chunks without revalidation',
 		{ ASSETS: assets },
 	);
 
-	expect(chunk.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+	expect(chunk.headers.get('cache-control')).toBe('no-store');
+	expect(chunk.headers.get('cloudflare-cdn-cache-control'))
+		.toBe('public, max-age=31536000, immutable');
 	expect(manifest.headers.get('cache-control')).toBe(defaultCacheControl);
 });

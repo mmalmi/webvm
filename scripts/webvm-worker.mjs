@@ -11,7 +11,8 @@ const CROSS_ORIGIN_HEADERS = {
 	'X-Frame-Options': 'DENY',
 };
 
-const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const ROOTFS_BROWSER_CACHE_CONTROL = 'no-store';
+const ROOTFS_EDGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const CONTENT_ADDRESSED_ROOTFS_PATH = /^\/v86\/guest\/rootfs\/[0-9a-f]{8}\.bin\.zst$/u;
 
 function withWebVmHeaders(response, url) {
@@ -20,7 +21,12 @@ function withWebVmHeaders(response, url) {
 		headers.set(name, value);
 	}
 	if (CONTENT_ADDRESSED_ROOTFS_PATH.test(url.pathname)) {
-		headers.set('Cache-Control', IMMUTABLE_CACHE_CONTROL);
+		// Chromium can fail the entire VM chunk request with ERR_CACHE_WRITE_FAILURE
+		// when its local disk cache is unhealthy or the host is low on storage.
+		// Keep content-addressed chunks at the edge, but never make boot depend on a
+		// successful browser-cache write.
+		headers.set('Cache-Control', ROOTFS_BROWSER_CACHE_CONTROL);
+		headers.set('Cloudflare-CDN-Cache-Control', ROOTFS_EDGE_CACHE_CONTROL);
 	}
 
 	return new Response(response.body, {
