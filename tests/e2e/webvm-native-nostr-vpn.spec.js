@@ -278,6 +278,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 					pendingReplies:
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
 					directApprovalForwards: stats.directApprovalForwards,
+					directApprovalReplays: stats.directApprovalReplays,
 					directRouteRegistrations: stats.directRouteRegistrations,
 					subscriptionBatches: stats.subscriptionBatches,
 					relayEvents: stats.relayEvents,
@@ -297,7 +298,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		};
 		const beforeApproval = await captureDeliveryState();
 		expect(beforeApproval.approvalSeen).toBe(false);
-		expect(beforeApproval.directRouteRegistrations ?? 0).toBeGreaterThanOrEqual(1);
+		expect(beforeApproval.directRouteRegistrations ?? 0).toBeGreaterThanOrEqual(2);
 		expect(beforeApproval.directApprovalForwards ?? 0).toBe(0);
 		expect(beforeApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(beforeApproval.relayEvents ?? 0).toBe(0);

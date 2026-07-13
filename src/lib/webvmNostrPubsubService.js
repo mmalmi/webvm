@@ -4,6 +4,8 @@ const DIRECT_JOIN_APPROVAL_PORT = 7368;
 const DIRECT_JOIN_APPROVAL_ROUTE_MAGIC = new TextEncoder().encode('NVPNFWD1');
 const DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION = new TextEncoder().encode('NVPNPAIR1');
 const DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES = DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.length + 32;
+const DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS = 5_000;
+const MAX_PENDING_DIRECT_APPROVAL_FRAMES = 4;
 const directApprovalCodec = new FipsPubsubWireCodec();
 
 function decodeRoutedJoinApproval(payload) {
@@ -33,6 +35,11 @@ function isApprovalRouteRegistration(payload) {
 	return payload instanceof Uint8Array
 		&& payload.length === DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION.length
 		&& DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION.every((byte, index) => payload[index] === byte);
+}
+
+function xOnlyPeerIdentity(peer) {
+	const identity = String(peer || '').toLowerCase();
+	return /^(?:02|03)[0-9a-f]{64}$/.test(identity) ? identity.slice(2) : null;
 }
 
 function validateRelayClients(relayClients) {
@@ -149,6 +156,7 @@ export function createWebvmNostrPubsubService({
 		throw new TypeError('WebVM local FIPS peers must be provided by a function');
 	}
 	const relayUrls = validateRelayClients(relayClients);
+	const pendingDirectApprovals = new Map();
 	const stats = {
 		subscriptionBatches: 0,
 		relaySubscriptions: 0,
@@ -161,9 +169,46 @@ export function createWebvmNostrPubsubService({
 		lastServiceErrorMessage: '',
 		unauthorizedPeers: 0,
 		directApprovalForwards: 0,
+		directApprovalReplays: 0,
 		directRouteRegistrations: 0,
 		recentSubscriptionFilters: [],
 		recentRelayEvents: [],
+	};
+	const rememberDirectApproval = (approval) => {
+		const now = Date.now();
+		for (const [recipient, pending] of pendingDirectApprovals) {
+			if (pending.expiresAt <= now) pendingDirectApprovals.delete(recipient);
+		}
+		const previous = pendingDirectApprovals.get(approval.recipient);
+		const frames = previous?.expiresAt > now ? previous.frames : [];
+		if (!frames.some((frame) => frame.length === approval.frame.length
+			&& frame.every((byte, index) => byte === approval.frame[index]))) {
+			frames.push(approval.frame.slice());
+			if (frames.length > MAX_PENDING_DIRECT_APPROVAL_FRAMES) frames.shift();
+		}
+		pendingDirectApprovals.set(approval.recipient, {
+			frames,
+			expiresAt: now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS,
+		});
+	};
+	const replayDirectApproval = async (peer) => {
+		const recipient = xOnlyPeerIdentity(peer);
+		if (!recipient) return;
+		const pending = pendingDirectApprovals.get(recipient);
+		if (!pending) return;
+		if (pending.expiresAt <= Date.now()) {
+			pendingDirectApprovals.delete(recipient);
+			return;
+		}
+		for (const frame of pending.frames) {
+			await node.sendDatagram({
+				dst: peer,
+				srcPort: DIRECT_JOIN_APPROVAL_PORT,
+				dstPort: DIRECT_JOIN_APPROVAL_PORT,
+				payload: frame,
+			});
+			stats.directApprovalReplays += 1;
+		}
 	};
 	const authorizedNode = {
 		registerService(port, handler) {
@@ -173,6 +218,7 @@ export function createWebvmNostrPubsubService({
 						&& context?.dstPort === port
 						&& isApprovalRouteRegistration(context.payload)) {
 						stats.directRouteRegistrations += 1;
+						await replayDirectApproval(context.src);
 						return;
 					}
 					return handler(context);
@@ -182,9 +228,10 @@ export function createWebvmNostrPubsubService({
 					: null;
 				if (approval) {
 					const dst = [...new Set(localPeers())].find(
-						(peer) => peer.toLowerCase().slice(2) === approval.recipient,
+						(peer) => xOnlyPeerIdentity(peer) === approval.recipient,
 					);
 					if (!dst) throw new Error('WebVM local FIPS approval recipient is unavailable');
+					rememberDirectApproval(approval);
 					await node.sendDatagram({
 						dst,
 						srcPort: port,
@@ -226,6 +273,7 @@ export function createWebvmNostrPubsubService({
 		async stop() {
 			if (stopped) return;
 			stopped = true;
+			pendingDirectApprovals.clear();
 			await service.stop();
 		},
 	};

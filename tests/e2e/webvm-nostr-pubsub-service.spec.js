@@ -265,6 +265,63 @@ test('WebVM registers the guest return route without opening a relay subscriptio
 	await bridge.stop();
 });
 
+test('WebVM replays one pending direct approval when its exact guest is ready', async () => {
+	const node = new MemoryFipsNode();
+	const relayClient = new MemoryRelayClient('wss://relay.example');
+	const localGuest = `02${'3'.repeat(64)}`;
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [relayClient],
+		authorizePeer: (peer) => peer === localGuest,
+		localPeers: () => [localGuest],
+	});
+	const adapter = new FipsPubsubWireAdapter();
+	const payload = adapter.encodeOutbound({
+		type: 'event',
+		subscriptionId: 'nvpn-join-replay-test',
+		event,
+	});
+	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
+	routedPayload.set(routeMagic);
+	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
+	routedPayload.set(payload, routeMagic.length + 32);
+
+	await node.receive({
+		src: `02${'4'.repeat(64)}`,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedPayload,
+	});
+	await node.receive({
+		src: localGuest,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: new TextEncoder().encode('NVPNPAIR1'),
+	});
+
+	expect(node.sent).toEqual([
+		{
+			dst: localGuest,
+			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+			payload,
+		},
+		{
+			dst: localGuest,
+			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+			payload,
+		},
+	]);
+	expect(bridge.stats.directApprovalForwards).toBe(1);
+	expect(bridge.stats.directApprovalReplays).toBe(1);
+	expect(bridge.stats.directRouteRegistrations).toBe(1);
+	expect(relayClient.requests).toHaveLength(0);
+	expect(relayClient.published).toHaveLength(0);
+
+	await bridge.stop();
+});
+
 test('port 7368 crosses an authenticated in-memory FIPS session end to end', async () => {
 	const hub = new MemoryTransportHub();
 	const hostIdentity = await identityFromSecretKey(new Uint8Array(32).fill(11));
