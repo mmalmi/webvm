@@ -21,6 +21,7 @@ const event = finalizeEvent({
 }, secretKey);
 const peerId = `02${event.pubkey}`;
 const routeMagic = new TextEncoder().encode('NVPNFWD1');
+const ackMagic = new TextEncoder().encode('NVPNACK1');
 
 class MemoryFipsNode {
 	services = new Map();
@@ -318,6 +319,74 @@ test('WebVM replays one pending direct approval when its exact guest is ready', 
 	expect(bridge.stats.directRouteRegistrations).toBe(1);
 	expect(relayClient.requests).toHaveLength(0);
 	expect(relayClient.published).toHaveLength(0);
+
+	await bridge.stop();
+});
+
+test('WebVM forwards the guest apply ACK and replays it when the sender retries', async () => {
+	const node = new MemoryFipsNode();
+	const relayClient = new MemoryRelayClient('wss://relay.example');
+	const localGuest = `02${'3'.repeat(64)}`;
+	const upstreamAdmin = `02${'4'.repeat(64)}`;
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [relayClient],
+		authorizePeer: (peer) => peer === localGuest,
+		localPeers: () => [localGuest],
+	});
+	const adapter = new FipsPubsubWireAdapter();
+	const payload = adapter.encodeOutbound({
+		type: 'event',
+		subscriptionId: 'nvpn-join-ack-test',
+		event,
+	});
+	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
+	routedPayload.set(routeMagic);
+	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
+	routedPayload.set(payload, routeMagic.length + 32);
+	const ackPayload = new Uint8Array(ackMagic.length + 2);
+	ackPayload.set(ackMagic);
+	ackPayload.set(new TextEncoder().encode('{}'), ackMagic.length);
+
+	await node.receive({
+		src: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedPayload,
+	});
+	await node.receive({
+		src: localGuest,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: ackPayload,
+	});
+
+	expect(node.sent[1]).toEqual({
+		dst: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: ackPayload,
+	});
+
+	// Model a lost first ACK: the admin repeats the same approval. The browser
+	// answers from its bounded cache without depending on another guest wakeup.
+	await node.receive({
+		src: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedPayload,
+	});
+
+	expect(node.sent[2]).toEqual({
+		dst: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: ackPayload,
+	});
+	expect(bridge.stats.directApprovalForwards).toBe(1);
+	expect(bridge.stats.directApprovalAcks).toBe(1);
+	expect(bridge.stats.directApprovalAckReplays).toBe(1);
+	expect(relayClient.requests).toHaveLength(0);
 
 	await bridge.stop();
 });
