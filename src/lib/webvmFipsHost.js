@@ -81,7 +81,6 @@ export async function createWebvmFipsHost({
 		maxConnections: 16,
 		maxAutoConnections: 4,
 		preferredAutoConnectPeers: preferredIngresses,
-		preferredAutoConnectSignalRelays: [...relays],
 		connectTimeoutMs: 12_000,
 		iceGatherTimeoutMs: 2_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,

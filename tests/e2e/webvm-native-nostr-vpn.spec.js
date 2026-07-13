@@ -272,13 +272,6 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		expect(await page.evaluate(
 			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxAutoConnections,
 		)).toBe(4);
-		expect(await page.evaluate(
-			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.preferredAutoConnectSignalRelays,
-		)).toEqual([
-			'wss://temp.iris.to',
-			'wss://relay.damus.io',
-			'wss://nos.lol',
-		]);
 		const browserHostPublicKey = await page.evaluate(
 			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
 		);
