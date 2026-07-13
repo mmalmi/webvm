@@ -234,7 +234,7 @@ async function startAndScanJoinRequest(page) {
 }
 
 test('admin approval reaches WebVM directly over FIPS without relay traffic', async ({ page }) => {
-	test.setTimeout(300_000);
+	test.setTimeout(420_000);
 	// The production Worker sends this response directive for rootfs chunks.
 	// Mirror it in Vite preview so Chromium never needs a disk-cache write to boot.
 	await page.route('**/v86/guest/rootfs/*.bin.zst', async (route) => {
@@ -341,8 +341,50 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
 		expect(guestOutput).toContain('via mesh');
 		expect(guestOutput).not.toContain('ping: bad address');
-		const meshReachabilityLatencyMs = Date.now() - approvalStartedAt;
 		const afterApproval = await captureDeliveryState();
+		await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
+		await page.reload();
+		await attachSerial(page);
+		await waitUntil(
+			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
+			{ timeoutMs: 120_000, message: 'restored WebVM terminal did not become ready' },
+		);
+		await waitUntil(
+			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
+			{ timeoutMs: 120_000, message: 'restored WebVM did not reattach to browser FIPS' },
+		);
+		await waitUntil(
+			() => page.evaluate(() => (
+				globalThis.__nvpnJoinE2eSerial?.text || ''
+			).includes('root@webvm:~#')),
+			{ timeoutMs: 60_000, message: 'restored WebVM shell did not become ready' },
+		);
+		await page.evaluate((exitNode) => {
+			const serial = globalThis.__nvpnJoinE2eSerial;
+			serial.text = '';
+			serial.emulator.serial0_send(
+				`for i in $(seq 1 30); do nvpn ping ${exitNode} --count 1 --timeout-secs 1 >/dev/null 2>&1 || true; nvpn status | grep -q 'via mesh' && { nvpn status; break; }; sleep 1; done\n`,
+			);
+		}, imported.exitNode);
+		try {
+			await waitUntil(
+				() => page.evaluate(() => (
+					globalThis.__nvpnJoinE2eSerial?.text || ''
+				).includes('via mesh')),
+				{
+					timeoutMs: 60_000,
+					message: 'restored WebVM traffic was not reported as reachable via mesh',
+				},
+			);
+		} catch (error) {
+			throw await approvalFailure(error);
+		}
+		const restoredGuestOutput = await page.evaluate(
+			() => globalThis.__nvpnJoinE2eSerial.text,
+		);
+		expect(restoredGuestOutput).toContain('via mesh');
+		const afterReload = await captureDeliveryState();
+		const meshReachabilityLatencyMs = Date.now() - approvalStartedAt;
 		console.log(`native approval ACK reached WebVM in ${approvalAckLatencyMs}ms`);
 		console.log(`approved peer became reachable via mesh in ${meshReachabilityLatencyMs}ms`);
 		expect(afterApproval.directApprovalForwards).toBe(imported.directEvents);
@@ -350,6 +392,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(afterApproval.relayEvents ?? 0).toBe(0);
 		expect(afterApproval.relaySubscriptions ?? 0).toBe(0);
+		expect(afterReload.subscriptionBatches ?? 0).toBe(0);
+		expect(afterReload.relayEvents ?? 0).toBe(0);
+		expect(afterReload.relaySubscriptions ?? 0).toBe(0);
 		await admin.cleanup();
 	} finally {
 		admin.stop();
