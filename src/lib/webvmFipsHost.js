@@ -35,6 +35,16 @@ function loadSecretKey() {
 	return globalThis.crypto.getRandomValues(new Uint8Array(32));
 }
 
+async function createWebvmIdentity() {
+	for (;;) {
+		const identity = await identityFromSecretKey(loadSecretKey());
+		// Scanned FIPS routes use the compact x-only Nostr key. Keep the
+		// ephemeral full key on its canonical even-parity representation so
+		// native peers reconstruct the same WebRTC identity from that route.
+		if (identity.publicKey[0] === 0x02) return identity;
+	}
+}
+
 function macForIdentity(identity) {
 	const mac = new Uint8Array(6);
 	mac[0] = 0x02;
@@ -51,7 +61,7 @@ export async function createWebvmFipsHost({
 	logger = noopLogger,
 	onStatus = () => {},
 } = {}) {
-	const identity = await identityFromSecretKey(loadSecretKey());
+	const identity = await createWebvmIdentity();
 	const sharedRelayClients = relayClients || relays.map((url) => new NostrRelayClient({
 		url,
 		logger,
@@ -76,7 +86,8 @@ export async function createWebvmFipsHost({
 		advertiseOnNostr: false,
 		autoConnect: true,
 		acceptConnections: true,
-		maxConnections: 3,
+		maxConnections: 4,
+		maxAutoConnections: 2,
 		connectTimeoutMs: 12_000,
 		iceGatherTimeoutMs: 2_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
@@ -95,6 +106,7 @@ export async function createWebvmFipsHost({
 		node,
 		relayClients: sharedRelayClients,
 		authorizePeer: (peer) => localEthernetPeers.has(peer),
+		localPeers: () => [...localEthernetPeers],
 		logger,
 	});
 	const webrtcPeerKeys = new Set();

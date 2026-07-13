@@ -235,6 +235,11 @@ async function startAndScanJoinRequest(page) {
 
 test('admin approval reaches WebVM directly over FIPS without relay traffic', async ({ page }) => {
 	test.setTimeout(300_000);
+	const browserMessages = [];
+	page.on('console', (message) => {
+		browserMessages.push(`${message.type()}: ${message.text()}`);
+		if (browserMessages.length > 200) browserMessages.shift();
+	});
 	const nvpn = nvpnBinary();
 	const isolated = createIsolatedAdmin(nvpn);
 	const admin = startAdminHelper({ configPath: isolated.configPath });
@@ -290,7 +295,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		try {
 			await waitUntil(
 				async () => (await captureDeliveryState()).approvalSeen,
-				{ timeoutMs: 120_000, message: 'WebVM did not observe admin approval' },
+				{ timeoutMs: 5_000, message: 'WebVM did not observe admin approval within 5 seconds' },
 			);
 		} catch (error) {
 			const diagnostics = await page.evaluate(() => ({
@@ -323,7 +328,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			);
 			const guestLog = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text.slice(-16_000));
 			throw new Error(
-				`${error.message}: ${JSON.stringify(diagnostics)}\nGuest log:\n${guestLog}`,
+				`${error.message}: ${JSON.stringify(diagnostics)}\nBrowser log:\n${browserMessages.join('\n')}\nGuest log:\n${guestLog}`,
 			);
 		}
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);

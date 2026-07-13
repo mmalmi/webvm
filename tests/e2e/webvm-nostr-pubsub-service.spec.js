@@ -20,10 +20,12 @@ const event = finalizeEvent({
 	content: 'opaque encrypted application payload',
 }, secretKey);
 const peerId = `02${event.pubkey}`;
+const routeMagic = new TextEncoder().encode('NVPNFWD1');
 
 class MemoryFipsNode {
 	services = new Map();
 	sessionListeners = new Set();
+	sent = [];
 
 	registerService(port, handler) {
 		this.services.set(port, handler);
@@ -38,6 +40,10 @@ class MemoryFipsNode {
 
 	receive(context) {
 		return this.services.get(context.dstPort)(context);
+	}
+
+	async sendDatagram(datagram) {
+		this.sent.push(datagram);
 	}
 }
 
@@ -189,13 +195,72 @@ test('WebVM rejects pubsub access from non-local FIPS peers', async () => {
 	});
 	const adapter = new FipsPubsubWireAdapter();
 
-	expect(() => node.receive(fipsContext(adapter.encodeOutbound({
+	await expect(node.receive(fipsContext(adapter.encodeOutbound({
 		type: 'req',
 		subscriptionId: 'remote-request',
 		filters: [{ kinds: [7368] }],
-	}), []))).toThrow(/restricted to local Ethernet guests/);
+	}), []))).rejects.toThrow(/restricted to local Ethernet guests/);
 	expect(relayClient.requests).toHaveLength(0);
 	expect(bridge.stats.unauthorizedPeers).toBe(1);
+
+	await bridge.stop();
+});
+
+test('WebVM forwards a routed approval directly to its local FIPS guest', async () => {
+	const node = new MemoryFipsNode();
+	const relayClient = new MemoryRelayClient('wss://relay.example');
+	const localGuest = `02${'3'.repeat(64)}`;
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [relayClient],
+		authorizePeer: () => false,
+		localPeers: () => [localGuest],
+	});
+	const adapter = new FipsPubsubWireAdapter();
+	const payload = adapter.encodeOutbound({
+		type: 'event',
+		subscriptionId: 'nvpn-join-1234567890abcdef',
+		event,
+	});
+	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
+	routedPayload.set(routeMagic);
+	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
+	routedPayload.set(payload, routeMagic.length + 32);
+
+	await node.receive({
+		src: `02${'4'.repeat(64)}`,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedPayload,
+	});
+
+	expect(node.sent).toEqual([{
+		dst: localGuest,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload,
+	}]);
+	expect(bridge.stats.directApprovalForwards).toBe(1);
+	expect(relayClient.requests).toHaveLength(0);
+	expect(relayClient.published).toHaveLength(0);
+
+	await bridge.stop();
+});
+
+test('WebVM registers the guest return route without opening a relay subscription', async () => {
+	const node = new MemoryFipsNode();
+	const relayClient = new MemoryRelayClient('wss://relay.example');
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [relayClient],
+		authorizePeer: (peer) => peer === peerId,
+	});
+
+	await node.receive(fipsContext(new TextEncoder().encode('NVPNPAIR1'), []));
+
+	expect(bridge.stats.directRouteRegistrations).toBe(1);
+	expect(relayClient.requests).toHaveLength(0);
+	expect(relayClient.published).toHaveLength(0);
 
 	await bridge.stop();
 });

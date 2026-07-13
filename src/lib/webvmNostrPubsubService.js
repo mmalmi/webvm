@@ -1,4 +1,39 @@
-import { FipsNostrRelayService } from 'nostr-pubsub';
+import { FipsNostrRelayService, FipsPubsubWireCodec } from 'nostr-pubsub';
+
+const DIRECT_JOIN_APPROVAL_PORT = 7368;
+const DIRECT_JOIN_APPROVAL_ROUTE_MAGIC = new TextEncoder().encode('NVPNFWD1');
+const DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION = new TextEncoder().encode('NVPNPAIR1');
+const DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES = DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.length + 32;
+const directApprovalCodec = new FipsPubsubWireCodec();
+
+function decodeRoutedJoinApproval(payload) {
+	try {
+		if (!(payload instanceof Uint8Array)
+			|| payload.length <= DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES
+			|| !DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.every((byte, index) => payload[index] === byte)) {
+			return null;
+		}
+		const recipient = payload.slice(
+			DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.length,
+			DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES,
+		);
+		const frame = payload.slice(DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES);
+		const message = directApprovalCodec.decodeFrame(frame);
+		if (message.type !== 'event' || !message.subscriptionId?.startsWith('nvpn-join-')) return null;
+		return {
+			recipient: [...recipient].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
+			frame,
+		};
+	} catch {
+		return null;
+	}
+}
+
+function isApprovalRouteRegistration(payload) {
+	return payload instanceof Uint8Array
+		&& payload.length === DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION.length
+		&& DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION.every((byte, index) => payload[index] === byte);
+}
 
 function validateRelayClients(relayClients) {
 	if (!Array.isArray(relayClients) || relayClients.length === 0) {
@@ -101,6 +136,7 @@ export function createWebvmNostrPubsubService({
 	relayClients,
 	limits,
 	authorizePeer = () => true,
+	localPeers = () => [],
 	logger = console,
 } = {}) {
 	if (!node || typeof node.registerService !== 'function') {
@@ -108,6 +144,9 @@ export function createWebvmNostrPubsubService({
 	}
 	if (typeof authorizePeer !== 'function') {
 		throw new TypeError('WebVM Nostr pubsub peer authorization must be a function');
+	}
+	if (typeof localPeers !== 'function') {
+		throw new TypeError('WebVM local FIPS peers must be provided by a function');
 	}
 	const relayUrls = validateRelayClients(relayClients);
 	const stats = {
@@ -121,17 +160,42 @@ export function createWebvmNostrPubsubService({
 		lastServiceError: '',
 		lastServiceErrorMessage: '',
 		unauthorizedPeers: 0,
+		directApprovalForwards: 0,
+		directRouteRegistrations: 0,
 		recentSubscriptionFilters: [],
 		recentRelayEvents: [],
 	};
 	const authorizedNode = {
 		registerService(port, handler) {
-			return node.registerService(port, (context) => {
-				if (!authorizePeer(String(context?.src || '').toLowerCase())) {
-					stats.unauthorizedPeers += 1;
-					throw new Error('WebVM Nostr pubsub is restricted to local Ethernet guests');
+			return node.registerService(port, async (context) => {
+				if (authorizePeer(String(context?.src || '').toLowerCase())) {
+					if (port === DIRECT_JOIN_APPROVAL_PORT
+						&& context?.dstPort === port
+						&& isApprovalRouteRegistration(context.payload)) {
+						stats.directRouteRegistrations += 1;
+						return;
+					}
+					return handler(context);
 				}
-				return handler(context);
+				const approval = port === DIRECT_JOIN_APPROVAL_PORT && context?.dstPort === port
+					? decodeRoutedJoinApproval(context.payload)
+					: null;
+				if (approval) {
+					const dst = [...new Set(localPeers())].find(
+						(peer) => peer.toLowerCase().slice(2) === approval.recipient,
+					);
+					if (!dst) throw new Error('WebVM local FIPS approval recipient is unavailable');
+					await node.sendDatagram({
+						dst,
+						srcPort: port,
+						dstPort: port,
+						payload: approval.frame,
+					});
+					stats.directApprovalForwards += 1;
+					return;
+				}
+				stats.unauthorizedPeers += 1;
+				throw new Error('WebVM Nostr pubsub is restricted to local Ethernet guests');
 			});
 		},
 		on(event, listener) {
