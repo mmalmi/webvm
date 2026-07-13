@@ -37,7 +37,7 @@ function createIsolatedAdmin(nvpn) {
 	};
 }
 
-function startAdminHelper({ configPath, nvpn }) {
+function startAdminHelper({ configPath }) {
 	const manifest = path.resolve(
 		process.env.NVPN_APP_CORE_MANIFEST?.trim()
 			|| path.join(process.cwd(), '../nostr-vpn/crates/nostr-vpn-app-core/Cargo.toml'),
@@ -52,8 +52,6 @@ function startAdminHelper({ configPath, nvpn }) {
 		'--',
 		'--config-path',
 		configPath,
-		'--nvpn-bin',
-		nvpn,
 	], {
 		cwd: path.dirname(manifest),
 		env: { ...process.env, NVPN_WEBVM_REAL_E2E: '1', RUST_LOG: 'off' },
@@ -239,7 +237,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 	test.setTimeout(300_000);
 	const nvpn = nvpnBinary();
 	const isolated = createIsolatedAdmin(nvpn);
-	const admin = startAdminHelper({ configPath: isolated.configPath, nvpn });
+	const admin = startAdminHelper({ configPath: isolated.configPath });
 	try {
 		await admin.waitForStatus('ready');
 		await page.goto('/v86');
@@ -249,7 +247,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			{ timeoutMs: 120_000, message: 'WebVM did not attach to browser FIPS' },
 		);
 		const { request } = await startAndScanJoinRequest(page);
-		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/);
+		expect(request).toMatch(
+			/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+\?r=[A-Za-z0-9_-]{43}$/,
+		);
 		const approvalStartedAt = Date.now();
 		const deliveryTimeline = [];
 		let lastDeliveryState = '';
@@ -286,6 +286,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		expect(beforeApproval.relaySubscriptions ?? 0).toBe(0);
 		const imported = await admin.approve(request);
 		expect(imported.participantAdded).toBe(true);
+		expect(imported.directEvents).toBe(2);
 		try {
 			await waitUntil(
 				async () => (await captureDeliveryState()).approvalSeen,
