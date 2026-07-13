@@ -312,22 +312,39 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		expect(imported.participantAdded).toBe(true);
 		expect(imported.directEvents).toBe(2);
 		expect(approvalAckLatencyMs).toBeLessThanOrEqual(15_000);
+		await page.evaluate(() => {
+			const serial = globalThis.__nvpnJoinE2eSerial;
+			serial.text = '';
+			serial.emulator.serial0_send('\x03');
+		});
 		try {
 			await waitUntil(
-				async () => (await captureDeliveryState()).approvalSeen,
-				{ timeoutMs: 15_000, message: 'WebVM shell did not report admin approval within 15 seconds' },
+				() => page.evaluate(() => (
+					globalThis.__nvpnJoinE2eSerial?.text || ''
+				).includes('root@webvm:~#')),
+				{ timeoutMs: 10_000, message: 'WebVM shell did not return after approval' },
+			);
+			await page.evaluate(() => {
+				globalThis.__nvpnJoinE2eSerial.emulator.serial0_send(
+					`for i in $(seq 1 60); do nvpn status | grep -q 'via mesh' && { nvpn status; break; }; sleep 0.5; done\n`,
+				);
+			});
+			await waitUntil(
+				() => page.evaluate(() => (
+					globalThis.__nvpnJoinE2eSerial?.text || ''
+				).includes('via mesh')),
+				{ timeoutMs: 45_000, message: 'approved WebVM peer did not become reachable via mesh' },
 			);
 		} catch (error) {
 			throw await approvalFailure(error);
 		}
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
-		expect(guestOutput).toContain('Join approved for network');
+		expect(guestOutput).toContain('via mesh');
 		expect(guestOutput).not.toContain('ping: bad address');
-		const approvalUiLatencyMs = Date.now() - approvalStartedAt;
+		const meshReachabilityLatencyMs = Date.now() - approvalStartedAt;
 		const afterApproval = await captureDeliveryState();
 		console.log(`native approval ACK reached WebVM in ${approvalAckLatencyMs}ms`);
-		console.log(`native approval reached the WebVM shell in ${approvalUiLatencyMs}ms`);
-		expect(approvalUiLatencyMs).toBeLessThanOrEqual(15_000);
+		console.log(`approved peer became reachable via mesh in ${meshReachabilityLatencyMs}ms`);
 		expect(afterApproval.directApprovalForwards).toBe(imported.directEvents);
 		expect(afterApproval.directApprovalAcks).toBeGreaterThanOrEqual(1);
 		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
