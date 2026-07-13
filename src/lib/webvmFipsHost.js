@@ -1,6 +1,5 @@
 import {
 	FipsNode,
-	identityFromSecretKey,
 	nodeAddrToHex,
 	noopLogger,
 	toHex,
@@ -12,6 +11,7 @@ import {
 	WebRtcTransport,
 } from '@fips/transport-webrtc';
 import { createV86EthernetFramePort } from '$lib/v86EthernetFramePort.js';
+import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
 export const DEFAULT_FIPS_RELAYS = Object.freeze([
@@ -27,23 +27,6 @@ export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([
 ]);
 
 export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
-
-function loadSecretKey() {
-	if (!globalThis.crypto?.getRandomValues) {
-		throw new Error('Secure browser randomness is unavailable');
-	}
-	return globalThis.crypto.getRandomValues(new Uint8Array(32));
-}
-
-async function createWebvmIdentity() {
-	for (;;) {
-		const identity = await identityFromSecretKey(loadSecretKey());
-		// Scanned FIPS routes use the compact x-only Nostr key. Keep the
-		// ephemeral full key on its canonical even-parity representation so
-		// native peers reconstruct the same WebRTC identity from that route.
-		if (identity.publicKey[0] === 0x02) return identity;
-	}
-}
 
 function macForIdentity(identity) {
 	const mac = new Uint8Array(6);
@@ -61,7 +44,7 @@ export async function createWebvmFipsHost({
 	logger = noopLogger,
 	onStatus = () => {},
 } = {}) {
-	const identity = await createWebvmIdentity();
+	const identity = await loadOrCreateWebvmFipsIdentity();
 	const sharedRelayClients = relayClients || relays.map((url) => new NostrRelayClient({
 		url,
 		logger,

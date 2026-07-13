@@ -13,9 +13,7 @@ const config = {
 				'connect-src': [
 					'self',
 					'stun:',
-					'wss://temp.iris.to',
-					'wss://relay.damus.io',
-					'wss://nos.lol'
+					'wss:'
 				],
 				'font-src': ['self', 'data:'],
 				'img-src': ['self', 'data:'],

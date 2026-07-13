@@ -260,6 +260,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
 			{ timeoutMs: 120_000, message: 'WebVM did not attach to browser FIPS' },
 		);
+		const browserHostPublicKey = await page.evaluate(
+			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
+		);
 		const { request } = await startAndScanJoinRequest(page);
 		expect(request).toMatch(
 			/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+\?r=[A-Za-z0-9_-]{43}$/,
@@ -353,6 +356,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
 			{ timeoutMs: 120_000, message: 'restored WebVM did not reattach to browser FIPS' },
 		);
+		expect(await page.evaluate(
+			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
+		)).toEqual(browserHostPublicKey);
 		await waitUntil(
 			() => page.evaluate(() => (
 				globalThis.__nvpnJoinE2eSerial?.text || ''
