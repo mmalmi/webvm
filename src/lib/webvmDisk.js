@@ -1,7 +1,11 @@
 const DATABASE_NAME = 'iris-webvm';
 const DATABASE_VERSION = 1;
 const DISK_RECORD_SCHEMA = 2;
-const PORTABLE_FILE_PATHS = ['/root/.ash_history'];
+const PORTABLE_FILE_PATHS = [
+	'/root/.ash_history',
+	'/var/lib/nvpn/config.toml',
+	'/var/lib/nvpn/config.toml.join-approval-ack',
+];
 const RECORD_KEY = 'root-filesystem';
 const SAVE_DELAY_MS = 1_000;
 const STORE_NAME = 'disks';
@@ -107,6 +111,20 @@ async function restorePortableFiles(filesystem, files) {
 	}
 }
 
+async function recoverPortableFilesFromState(filesystem, state) {
+	if (!state) return {};
+	const freshState = serializableFilesystemState(filesystem);
+	try {
+		filesystem.set_state(state);
+		return await readPortableFiles(filesystem);
+	} catch (error) {
+		console.warn('Could not recover portable files from the previous WebVM disk', error);
+		return {};
+	} finally {
+		filesystem.set_state(freshState);
+	}
+}
+
 export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus }) {
 	if (!globalThis.indexedDB || !filesystem?.get_state || !filesystem?.set_state) {
 		onStatus?.('unavailable');
@@ -125,8 +143,12 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 		if ([1, DISK_RECORD_SCHEMA].includes(record?.schema)
 			&& record.compatibilityId === compatibilityId) {
 			filesystem.set_state(record.state);
-		} else if (record?.schema === DISK_RECORD_SCHEMA) {
-			await restorePortableFiles(filesystem, record.portableFiles);
+		} else if ([1, DISK_RECORD_SCHEMA].includes(record?.schema)) {
+			const recoveredFiles = await recoverPortableFilesFromState(filesystem, record.state);
+			await restorePortableFiles(filesystem, {
+				...recoveredFiles,
+				...record.portableFiles,
+			});
 		}
 		void navigator.storage?.persist?.().catch(() => false);
 		await publishReadyStatus();

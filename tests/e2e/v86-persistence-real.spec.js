@@ -60,6 +60,8 @@ async function invalidateSavedDiskCompatibility(page) {
 			request.onerror = () => reject(request.error);
 		});
 		record.compatibilityId = 'previous-guest-release';
+		delete record.portableFiles?.['/var/lib/nvpn/config.toml'];
+		delete record.portableFiles?.['/var/lib/nvpn/config.toml.join-approval-ack'];
 		store.put(record, 'root-filesystem');
 		await new Promise((resolve, reject) => {
 			transaction.oncomplete = resolve;
@@ -70,7 +72,7 @@ async function invalidateSavedDiskCompatibility(page) {
 	});
 }
 
-test('real v86 preserves user history and files across refresh until reset', async ({ page }) => {
+test('real v86 preserves approved nVPN state across a guest upgrade', async ({ page }) => {
 	await page.goto('/v86');
 	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
 		.toContainText('Starting FIPS networking...');
@@ -92,6 +94,11 @@ test('real v86 preserves user history and files across refresh until reset', asy
 		page,
 		"printf 'browser-local-data\\n' > /root/webvm-persistence-check",
 		'__FILE_WRITTEN__',
+	);
+	await runCommand(
+		page,
+		"mkdir -p /var/lib/nvpn && printf 'network_id = \"upgrade-fixture\"\\n' > /var/lib/nvpn/config.toml && printf 'signed-ack-fixture\\n' > /var/lib/nvpn/config.toml.join-approval-ack",
+		'__NVPN_STATE_WRITTEN__',
 	);
 	await runCommand(page, 'echo user-history-survives-refresh', '__USER_HISTORY_WRITTEN__');
 	await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
@@ -119,6 +126,14 @@ test('real v86 preserves user history and files across refresh until reset', asy
 		'__UPGRADE_CHECKED__',
 	);
 	await expect.poll(() => terminalText(page)).toContain('upgrade-clean');
+	await runCommand(
+		page,
+		"grep -F 'network_id = \"upgrade-fixture\"' /var/lib/nvpn/config.toml && grep -F 'signed-ack-fixture' /var/lib/nvpn/config.toml.join-approval-ack",
+		'__NVPN_STATE_UPGRADED__',
+	);
+	const upgradedNvpnState = await terminalText(page);
+	expect(upgradedNvpnState).toContain('network_id = "upgrade-fixture"');
+	expect(upgradedNvpnState).toContain('signed-ack-fixture');
 
 	page.once('dialog', (dialog) => dialog.accept());
 	await Promise.all([
@@ -132,4 +147,10 @@ test('real v86 preserves user history and files across refresh until reset', asy
 		'__RESET_CHECKED__',
 	);
 	await expect.poll(() => terminalText(page)).toContain('reset-clean');
+	await runCommand(
+		page,
+		'test ! -e /var/lib/nvpn/config.toml && test ! -e /var/lib/nvpn/config.toml.join-approval-ack && echo nvpn-reset-clean',
+		'__NVPN_RESET_CHECKED__',
+	);
+	await expect.poll(() => terminalText(page)).toContain('nvpn-reset-clean');
 });
