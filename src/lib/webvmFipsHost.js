@@ -79,7 +79,7 @@ export async function createWebvmFipsHost({
 		autoConnect: true,
 		acceptConnections: true,
 		maxConnections: 16,
-		maxAutoConnections: 4,
+		maxAutoConnections: 8,
 		preferredAutoConnectPeers: preferredIngresses,
 		connectTimeoutMs: 12_000,
 		iceGatherTimeoutMs: 2_000,
@@ -100,6 +100,7 @@ export async function createWebvmFipsHost({
 		relayClients: sharedRelayClients,
 		authorizePeer: (peer) => localEthernetPeers.has(peer),
 		localPeers: () => [...localEthernetPeers],
+		onDirectApprovalPeer: rememberWebvmFipsIngress,
 		logger,
 	});
 	const webrtcPeerKeys = new Set();
@@ -132,7 +133,6 @@ export async function createWebvmFipsHost({
 		if (event?.remoteAddr?.transport === 'webrtc') {
 			if (connected) {
 				webrtcPeerKeys.add(peer);
-				rememberWebvmFipsIngress(peer);
 			}
 			else webrtcPeerKeys.delete(peer);
 		}

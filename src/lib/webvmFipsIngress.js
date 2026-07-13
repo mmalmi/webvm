@@ -1,4 +1,4 @@
-export const WEBVM_FIPS_INGRESS_STORAGE_KEY = 'iris-webvm:fips-ingress-peers:v1';
+export const WEBVM_FIPS_INGRESS_STORAGE_KEY = 'iris-webvm:fips-ingress-peers:v2';
 
 const MAX_PREFERRED_INGRESSES = 4;
 const COMPRESSED_PUBKEY_PATTERN = /^(02|03)[0-9a-f]{64}$/u;

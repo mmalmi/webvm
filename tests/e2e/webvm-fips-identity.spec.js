@@ -67,3 +67,11 @@ test('WebVM reconnects its most recently successful FIPS ingresses first', () =>
 	clearPreferredWebvmFipsIngresses(storage);
 	expect(loadPreferredWebvmFipsIngresses(storage)).toEqual([]);
 });
+
+test('WebVM ignores the ingress cache populated by arbitrary v1 connections', () => {
+	const storage = new MemoryStorage();
+	const arbitraryPeer = `02${'7'.repeat(64)}`;
+	storage.values.set('iris-webvm:fips-ingress-peers:v1', JSON.stringify([arbitraryPeer]));
+
+	expect(loadPreferredWebvmFipsIngresses(storage)).toEqual([]);
+});

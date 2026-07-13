@@ -152,6 +152,7 @@ export function createWebvmNostrPubsubService({
 	limits,
 	authorizePeer = () => true,
 	localPeers = () => [],
+	onDirectApprovalPeer = () => {},
 	directApprovalRetryMs = 500,
 	logger = console,
 } = {}) {
@@ -163,6 +164,9 @@ export function createWebvmNostrPubsubService({
 	}
 	if (typeof localPeers !== 'function') {
 		throw new TypeError('WebVM local FIPS peers must be provided by a function');
+	}
+	if (typeof onDirectApprovalPeer !== 'function') {
+		throw new TypeError('WebVM direct approval peer observer must be a function');
 	}
 	if (!Number.isSafeInteger(directApprovalRetryMs) || directApprovalRetryMs <= 0) {
 		throw new TypeError('WebVM direct approval retry interval must be a positive integer');
@@ -345,6 +349,7 @@ export function createWebvmNostrPubsubService({
 						dstPort: port,
 						payload: approval.frame,
 					});
+					onDirectApprovalPeer(context.src);
 					stats.directApprovalForwards += 1;
 					scheduleDirectApprovalReplay(approval.recipient);
 					return;

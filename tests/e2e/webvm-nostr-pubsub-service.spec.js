@@ -235,16 +235,18 @@ test('WebVM forwards a routed approval directly to its local FIPS guest', async 
 	const node = new MemoryFipsNode();
 	const relayClient = new MemoryRelayClient('wss://relay.example');
 	const localGuest = `02${'3'.repeat(64)}`;
+	const upstreamAdmin = `02${'4'.repeat(64)}`;
+	const approvalPeers = [];
 	const bridge = createWebvmNostrPubsubService({
 		node,
 		relayClients: [relayClient],
 		authorizePeer: () => false,
 		localPeers: () => [localGuest],
+		onDirectApprovalPeer: (peer) => approvalPeers.push(peer),
 	});
 	const { payload, routedPayload } = routedApproval('nvpn-join-1234567890abcdef');
-
 	await node.receive({
-		src: `02${'4'.repeat(64)}`,
+		src: upstreamAdmin,
 		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 		payload: routedPayload,
@@ -256,6 +258,7 @@ test('WebVM forwards a routed approval directly to its local FIPS guest', async 
 		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 		payload,
 	}]);
+	expect(approvalPeers).toEqual([upstreamAdmin]);
 	expect(bridge.stats.directApprovalForwards).toBe(1);
 	expect(relayClient.requests).toHaveLength(0);
 	expect(relayClient.published).toHaveLength(0);
