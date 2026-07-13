@@ -45,7 +45,9 @@ int main(void) {
 	}
 	const int status = ioctl(random_fd, RNDADDENTROPY, &seed);
 	if (status < 0) perror("webvm-seed-rng: RNDADDENTROPY");
+	const int reseed_status = status < 0 ? -1 : ioctl(random_fd, RNDRESEEDCRNG, NULL);
+	if (reseed_status < 0 && status == 0) perror("webvm-seed-rng: RNDRESEEDCRNG");
 	close(random_fd);
 	erase_seed(&seed);
-	return status < 0 ? 1 : 0;
+	return status < 0 || reseed_status < 0 ? 1 : 0;
 }
