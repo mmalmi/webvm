@@ -4,6 +4,10 @@ const DISK_RECORD_SCHEMA = 2;
 const PORTABLE_FILE_PATHS = [
 	'/root/.ash_history',
 	'/var/lib/nvpn/config.toml',
+	'/var/lib/nvpn/.config.toml.nostr-secret-key.secret',
+	'/var/lib/nvpn/.config.toml.pending-join-request.secret',
+	'/var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret',
+	'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret',
 	'/var/lib/nvpn/config.toml.join-approval-ack',
 ];
 const RECORD_KEY = 'root-filesystem';

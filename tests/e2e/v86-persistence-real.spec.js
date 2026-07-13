@@ -61,6 +61,14 @@ async function invalidateSavedDiskCompatibility(page) {
 		});
 		record.compatibilityId = 'previous-guest-release';
 		delete record.portableFiles?.['/var/lib/nvpn/config.toml'];
+		delete record.portableFiles?.['/var/lib/nvpn/.config.toml.nostr-secret-key.secret'];
+		delete record.portableFiles?.['/var/lib/nvpn/.config.toml.pending-join-request.secret'];
+		delete record.portableFiles?.[
+			'/var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret'
+		];
+		delete record.portableFiles?.[
+			'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret'
+		];
 		delete record.portableFiles?.['/var/lib/nvpn/config.toml.join-approval-ack'];
 		store.put(record, 'root-filesystem');
 		await new Promise((resolve, reject) => {
@@ -97,7 +105,7 @@ test('real v86 preserves approved nVPN state across a guest upgrade', async ({ p
 	);
 	await runCommand(
 		page,
-		"mkdir -p /var/lib/nvpn && printf 'network_id = \"upgrade-fixture\"\\n' > /var/lib/nvpn/config.toml && printf 'signed-ack-fixture\\n' > /var/lib/nvpn/config.toml.join-approval-ack",
+		"mkdir -p /var/lib/nvpn && printf 'network_id = \"upgrade-fixture\"\\n' > /var/lib/nvpn/config.toml && printf 'nostr-secret-fixture\\n' > /var/lib/nvpn/.config.toml.nostr-secret-key.secret && printf 'pending-request-fixture\\n' > /var/lib/nvpn/.config.toml.pending-join-request.secret && printf 'wg-preshared-fixture\\n' > /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && printf 'wg-private-fixture\\n' > /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret && printf 'signed-ack-fixture\\n' > /var/lib/nvpn/config.toml.join-approval-ack",
 		'__NVPN_STATE_WRITTEN__',
 	);
 	await runCommand(page, 'echo user-history-survives-refresh', '__USER_HISTORY_WRITTEN__');
@@ -128,7 +136,7 @@ test('real v86 preserves approved nVPN state across a guest upgrade', async ({ p
 	await expect.poll(() => terminalText(page)).toContain('upgrade-clean');
 	await runCommand(
 		page,
-		"grep -F 'network_id = \"upgrade-fixture\"' /var/lib/nvpn/config.toml && grep -F 'signed-ack-fixture' /var/lib/nvpn/config.toml.join-approval-ack",
+		"grep -F 'network_id = \"upgrade-fixture\"' /var/lib/nvpn/config.toml && grep -F 'nostr-secret-fixture' /var/lib/nvpn/.config.toml.nostr-secret-key.secret && grep -F 'pending-request-fixture' /var/lib/nvpn/.config.toml.pending-join-request.secret && grep -F 'wg-preshared-fixture' /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && grep -F 'wg-private-fixture' /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret && grep -F 'signed-ack-fixture' /var/lib/nvpn/config.toml.join-approval-ack",
 		'__NVPN_STATE_UPGRADED__',
 	);
 	const upgradedNvpnState = await terminalText(page);
@@ -149,7 +157,7 @@ test('real v86 preserves approved nVPN state across a guest upgrade', async ({ p
 	await expect.poll(() => terminalText(page)).toContain('reset-clean');
 	await runCommand(
 		page,
-		'test ! -e /var/lib/nvpn/config.toml && test ! -e /var/lib/nvpn/config.toml.join-approval-ack && echo nvpn-reset-clean',
+		'test ! -e /var/lib/nvpn/config.toml && test ! -e /var/lib/nvpn/.config.toml.nostr-secret-key.secret && test ! -e /var/lib/nvpn/.config.toml.pending-join-request.secret && test ! -e /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && test ! -e /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret && test ! -e /var/lib/nvpn/config.toml.join-approval-ack && echo nvpn-reset-clean',
 		'__NVPN_RESET_CHECKED__',
 	);
 	await expect.poll(() => terminalText(page)).toContain('nvpn-reset-clean');
