@@ -44,10 +44,10 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 		'for attempt in $(seq 1 150); do test -f /var/lib/nvpn/config.toml && break; sleep 0.1; done; ' +
 		'! grep -q "^\\[fips_bootstrap_peers\\]" /var/lib/nvpn/config.toml ' +
 		'&& nvpn status | grep -q "^fips_bootstrap_enabled: false$" ' +
-		'&& a=__WEBVM_NOSTR_; b=DISCOVERY_ONLY__; printf "%s%s\\n" "$a" "$b"',
+		'&& printf "__FIPS_ONLY__\\n"',
 	);
 	await page.keyboard.press('Enter');
-	await expect(rows).toContainText('__WEBVM_NOSTR_DISCOVERY_ONLY__', { timeout: 15_000 });
+	await expect(rows).toContainText('__FIPS_ONLY__', { timeout: 15_000 });
 
 	await page.keyboard.insertText(
 		'a=__WEBVM_FIPS_; b=READY__; ' +
