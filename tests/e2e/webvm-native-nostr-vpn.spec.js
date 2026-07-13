@@ -268,6 +268,8 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activeSubscriptionCount?.(),
 					pendingReplies:
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
+					directApprovalForwards: stats.directApprovalForwards,
+					directRouteRegistrations: stats.directRouteRegistrations,
 					subscriptionBatches: stats.subscriptionBatches,
 					relayEvents: stats.relayEvents,
 					relaySubscriptions: stats.relaySubscriptions,
@@ -286,6 +288,8 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		};
 		const beforeApproval = await captureDeliveryState();
 		expect(beforeApproval.approvalSeen).toBe(false);
+		expect(beforeApproval.directRouteRegistrations ?? 0).toBeGreaterThanOrEqual(1);
+		expect(beforeApproval.directApprovalForwards ?? 0).toBe(0);
 		expect(beforeApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(beforeApproval.relayEvents ?? 0).toBe(0);
 		expect(beforeApproval.relaySubscriptions ?? 0).toBe(0);
@@ -339,6 +343,7 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		console.log(`native approval reached WebVM in ${approvalLatencyMs}ms`);
 		console.log(`native approval delivery timeline ${JSON.stringify(deliveryTimeline)}`);
 		expect(approvalLatencyMs).toBeLessThanOrEqual(5_000);
+		expect(afterApproval.directApprovalForwards).toBe(imported.directEvents);
 		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(afterApproval.relayEvents ?? 0).toBe(0);
 		expect(afterApproval.relaySubscriptions ?? 0).toBe(0);
