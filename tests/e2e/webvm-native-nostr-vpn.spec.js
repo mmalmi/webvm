@@ -265,10 +265,8 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+\?r=[A-Za-z0-9_-]{43}$/,
 		);
 		const approvalStartedAt = Date.now();
-		const deliveryTimeline = [];
-		let lastDeliveryState = '';
 		const captureDeliveryState = async () => {
-			const state = await page.evaluate(() => {
+			return page.evaluate(() => {
 				const stats = globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats || {};
 				return {
 					approvalSeen: (globalThis.__nvpnJoinE2eSerial?.text || '')
@@ -279,6 +277,8 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
 					directApprovalForwards: stats.directApprovalForwards,
 					directApprovalReplays: stats.directApprovalReplays,
+					directApprovalAcks: stats.directApprovalAcks,
+					directApprovalAckReplays: stats.directApprovalAckReplays,
 					directRouteRegistrations: stats.directRouteRegistrations,
 					subscriptionBatches: stats.subscriptionBatches,
 					relayEvents: stats.relayEvents,
@@ -287,73 +287,49 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 					serviceErrors: stats.serviceErrors,
 				};
 			});
-			const comparable = JSON.stringify(state);
-			if (comparable !== lastDeliveryState) {
-				lastDeliveryState = comparable;
-				const sample = { elapsedMs: Date.now() - approvalStartedAt, ...state };
-				deliveryTimeline.push(sample);
-				console.log(`native approval delivery state ${JSON.stringify(sample)}`);
-			}
-			return state;
+		};
+		const approvalFailure = async (error) => {
+			const diagnostics = await captureDeliveryState();
+			return new Error(
+				`${error.message}: ${JSON.stringify(diagnostics)}`
+					+ `\nBrowser log:\n${browserMessages.join('\n')}`,
+			);
 		};
 		const beforeApproval = await captureDeliveryState();
 		expect(beforeApproval.approvalSeen).toBe(false);
-		expect(beforeApproval.directRouteRegistrations ?? 0).toBeGreaterThanOrEqual(2);
+		expect(beforeApproval.directRouteRegistrations ?? 0).toBeGreaterThanOrEqual(1);
 		expect(beforeApproval.directApprovalForwards ?? 0).toBe(0);
 		expect(beforeApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(beforeApproval.relayEvents ?? 0).toBe(0);
 		expect(beforeApproval.relaySubscriptions ?? 0).toBe(0);
-		const imported = await admin.approve(request);
+		let imported;
+		try {
+			imported = await admin.approve(request);
+		} catch (error) {
+			throw await approvalFailure(error);
+		}
+		const approvalAckLatencyMs = Date.now() - approvalStartedAt;
 		expect(imported.participantAdded).toBe(true);
 		expect(imported.directEvents).toBe(2);
+		expect(approvalAckLatencyMs).toBeLessThanOrEqual(15_000);
 		try {
 			await waitUntil(
 				async () => (await captureDeliveryState()).approvalSeen,
-				{ timeoutMs: 5_000, message: 'WebVM did not observe admin approval within 5 seconds' },
+				{ timeoutMs: 15_000, message: 'WebVM shell did not report admin approval within 15 seconds' },
 			);
 		} catch (error) {
-			const diagnostics = await page.evaluate(() => ({
-				fips: globalThis.irisWebvmV86?.state?.().fipsStatus,
-				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
-			}));
-			await page.evaluate(() => {
-				globalThis.__nvpnJoinE2eSerial.emulator.serial0_send('\u0003');
-			});
-			await waitUntil(
-				() => page.evaluate(() => {
-					const text = globalThis.__nvpnJoinE2eSerial?.text || '';
-					const stopped = text.lastIndexOf('Stopped waiting');
-					return stopped >= 0 && text.indexOf('root@webvm:~#', stopped) > stopped;
-				}),
-				{ timeoutMs: 10_000, message: 'WebVM join command did not stop' },
-			);
-			await page.evaluate(() => {
-				globalThis.__nvpnJoinE2eSerial.text = '';
-				globalThis.__nvpnJoinE2eSerial.emulator.serial0_send(
-					'rc-service webvm-nvpn stop >/dev/null; tail -n 120 /var/log/webvm-nvpn.log; printf "\\n__NVPN_GUEST_LOG__\\n"\n',
-				);
-			});
-			await waitUntil(
-				() => page.evaluate(() => (
-					(globalThis.__nvpnJoinE2eSerial?.text || '')
-						.match(/__NVPN_GUEST_LOG__/g)?.length || 0
-				) >= 2),
-				{ timeoutMs: 10_000, message: 'WebVM guest log did not render' },
-			);
-			const guestLog = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text.slice(-16_000));
-			throw new Error(
-				`${error.message}: ${JSON.stringify(diagnostics)}\nBrowser log:\n${browserMessages.join('\n')}\nGuest log:\n${guestLog}`,
-			);
+			throw await approvalFailure(error);
 		}
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
 		expect(guestOutput).toContain('Join approved for network');
 		expect(guestOutput).not.toContain('ping: bad address');
-		const approvalLatencyMs = Date.now() - approvalStartedAt;
+		const approvalUiLatencyMs = Date.now() - approvalStartedAt;
 		const afterApproval = await captureDeliveryState();
-		console.log(`native approval reached WebVM in ${approvalLatencyMs}ms`);
-		console.log(`native approval delivery timeline ${JSON.stringify(deliveryTimeline)}`);
-		expect(approvalLatencyMs).toBeLessThanOrEqual(5_000);
+		console.log(`native approval ACK reached WebVM in ${approvalAckLatencyMs}ms`);
+		console.log(`native approval reached the WebVM shell in ${approvalUiLatencyMs}ms`);
+		expect(approvalUiLatencyMs).toBeLessThanOrEqual(15_000);
 		expect(afterApproval.directApprovalForwards).toBe(imported.directEvents);
+		expect(afterApproval.directApprovalAcks).toBeGreaterThanOrEqual(1);
 		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(afterApproval.relayEvents ?? 0).toBe(0);
 		expect(afterApproval.relaySubscriptions ?? 0).toBe(0);

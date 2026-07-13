@@ -27,6 +27,12 @@ class MemoryFipsNode {
 	services = new Map();
 	sessionListeners = new Set();
 	sent = [];
+	activeSends = 0;
+	maxConcurrentSends = 0;
+
+	constructor(sendDelayMs = 0) {
+		this.sendDelayMs = sendDelayMs;
+	}
 
 	registerService(port, handler) {
 		this.services.set(port, handler);
@@ -44,8 +50,13 @@ class MemoryFipsNode {
 	}
 
 	async sendDatagram(datagram) {
+		this.activeSends += 1;
+		this.maxConcurrentSends = Math.max(this.maxConcurrentSends, this.activeSends);
+		if (this.sendDelayMs) await new Promise((resolve) => setTimeout(resolve, this.sendDelayMs));
 		this.sent.push(datagram);
+		this.activeSends -= 1;
 	}
+
 }
 
 class MemoryRelayClient {
@@ -136,6 +147,19 @@ function fipsContext(payload, replies) {
 	};
 }
 
+function routedApproval(subscriptionId) {
+	const payload = new FipsPubsubWireAdapter().encodeOutbound({
+		type: 'event',
+		subscriptionId,
+		event,
+	});
+	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
+	routedPayload.set(routeMagic);
+	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
+	routedPayload.set(payload, routeMagic.length + 32);
+	return { payload, routedPayload };
+}
+
 test('WebVM bridges only configured relays through the generic FIPS service', async () => {
 	const node = new MemoryFipsNode();
 	const relayClients = [
@@ -217,16 +241,7 @@ test('WebVM forwards a routed approval directly to its local FIPS guest', async 
 		authorizePeer: () => false,
 		localPeers: () => [localGuest],
 	});
-	const adapter = new FipsPubsubWireAdapter();
-	const payload = adapter.encodeOutbound({
-		type: 'event',
-		subscriptionId: 'nvpn-join-1234567890abcdef',
-		event,
-	});
-	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
-	routedPayload.set(routeMagic);
-	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
-	routedPayload.set(payload, routeMagic.length + 32);
+	const { payload, routedPayload } = routedApproval('nvpn-join-1234567890abcdef');
 
 	await node.receive({
 		src: `02${'4'.repeat(64)}`,
@@ -266,60 +281,92 @@ test('WebVM registers the guest return route without opening a relay subscriptio
 	await bridge.stop();
 });
 
-test('WebVM replays one pending direct approval when its exact guest is ready', async () => {
+test('WebVM retries a pending direct approval until the guest ACK arrives', async () => {
 	const node = new MemoryFipsNode();
 	const relayClient = new MemoryRelayClient('wss://relay.example');
 	const localGuest = `02${'3'.repeat(64)}`;
+	const upstreamAdmin = `02${'4'.repeat(64)}`;
 	const bridge = createWebvmNostrPubsubService({
 		node,
 		relayClients: [relayClient],
 		authorizePeer: (peer) => peer === localGuest,
 		localPeers: () => [localGuest],
+		directApprovalRetryMs: 5,
 	});
-	const adapter = new FipsPubsubWireAdapter();
-	const payload = adapter.encodeOutbound({
-		type: 'event',
-		subscriptionId: 'nvpn-join-replay-test',
-		event,
-	});
-	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
-	routedPayload.set(routeMagic);
-	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
-	routedPayload.set(payload, routeMagic.length + 32);
+	const { routedPayload } = routedApproval('nvpn-join-retry-test');
+	const ackPayload = new Uint8Array(ackMagic.length + 2);
+	ackPayload.set(ackMagic);
+	ackPayload.set(new TextEncoder().encode('{}'), ackMagic.length);
 
 	await node.receive({
-		src: `02${'4'.repeat(64)}`,
+		src: upstreamAdmin,
 		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 		payload: routedPayload,
 	});
+	await expect.poll(() => bridge.stats.directApprovalReplays).toBeGreaterThan(0);
 	await node.receive({
 		src: localGuest,
 		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-		payload: new TextEncoder().encode('NVPNPAIR1'),
+		payload: ackPayload,
 	});
+	const replayCount = bridge.stats.directApprovalReplays;
+	await new Promise((resolve) => setTimeout(resolve, 20));
 
-	expect(node.sent).toEqual([
-		{
-			dst: localGuest,
-			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			payload,
-		},
-		{
-			dst: localGuest,
-			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			payload,
-		},
-	]);
-	expect(bridge.stats.directApprovalForwards).toBe(1);
-	expect(bridge.stats.directApprovalReplays).toBe(1);
-	expect(bridge.stats.directRouteRegistrations).toBe(1);
+	expect(bridge.stats.directApprovalReplays).toBe(replayCount);
+	expect(bridge.stats.directApprovalAcks).toBe(1);
 	expect(relayClient.requests).toHaveLength(0);
-	expect(relayClient.published).toHaveLength(0);
 
+	await bridge.stop();
+});
+
+test('WebVM keeps retrying every frame of a multi-event approval', async () => {
+	const node = new MemoryFipsNode();
+	const localGuest = `02${'3'.repeat(64)}`;
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [new MemoryRelayClient('wss://relay.example')],
+		authorizePeer: (peer) => peer === localGuest,
+		localPeers: () => [localGuest],
+		directApprovalRetryMs: 5,
+	});
+	const upstreamAdmin = `02${'4'.repeat(64)}`;
+	for (const id of ['first', 'second']) {
+		await node.receive({
+			src: upstreamAdmin,
+			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+			payload: routedApproval(`nvpn-join-${id}`).routedPayload,
+		});
+	}
+
+	await expect.poll(() => bridge.stats.directApprovalReplays).toBeGreaterThanOrEqual(2);
+	const guestFrames = node.sent.filter(({ dst }) => dst === localGuest);
+	expect(guestFrames.length).toBeGreaterThanOrEqual(4);
+	expect(new Set(guestFrames.map(({ payload }) => [...payload].join(','))).size).toBe(2);
+	await bridge.stop();
+});
+
+test('WebVM serializes complete direct approval datagrams', async () => {
+	const node = new MemoryFipsNode(5);
+	const localGuest = `02${'3'.repeat(64)}`;
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [new MemoryRelayClient('wss://relay.example')],
+		authorizePeer: (peer) => peer === localGuest,
+		localPeers: () => [localGuest],
+	});
+	const upstreamAdmin = `02${'4'.repeat(64)}`;
+	await Promise.all(['first', 'second'].map((id) => node.receive({
+		src: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedApproval(`nvpn-join-${id}`).routedPayload,
+	})));
+
+	expect(node.sent).toHaveLength(2);
+	expect(node.maxConcurrentSends).toBe(1);
 	await bridge.stop();
 });
 
@@ -334,16 +381,7 @@ test('WebVM forwards the guest apply ACK and replays it when the sender retries'
 		authorizePeer: (peer) => peer === localGuest,
 		localPeers: () => [localGuest],
 	});
-	const adapter = new FipsPubsubWireAdapter();
-	const payload = adapter.encodeOutbound({
-		type: 'event',
-		subscriptionId: 'nvpn-join-ack-test',
-		event,
-	});
-	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
-	routedPayload.set(routeMagic);
-	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
-	routedPayload.set(payload, routeMagic.length + 32);
+	const { routedPayload } = routedApproval('nvpn-join-ack-test');
 	const ackPayload = new Uint8Array(ackMagic.length + 2);
 	ackPayload.set(ackMagic);
 	ackPayload.set(new TextEncoder().encode('{}'), ackMagic.length);

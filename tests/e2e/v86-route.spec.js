@@ -212,7 +212,11 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	expect(resumeCommand).toMatch(
 		/^stty -echo; printf '%s' '[0-9a-f]{128}' \| xxd -r -p \| webvm-seed-rng; /,
 	);
+	expect(resumeCommand).toMatch(/date -u -s '@[0-9]{10}' >\/dev\/null; /);
 	expect(resumeCommand.indexOf('webvm-seed-rng')).toBeLessThan(
+		resumeCommand.indexOf('date -u -s'),
+	);
+	expect(resumeCommand.indexOf('date -u -s')).toBeLessThan(
 		resumeCommand.indexOf('rc-service webvm-nvpn start'),
 	);
 	expect(resumeCommand.indexOf('rc-service webvm-nvpn start')).toBeLessThan(

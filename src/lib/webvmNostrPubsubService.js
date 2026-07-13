@@ -152,6 +152,7 @@ export function createWebvmNostrPubsubService({
 	limits,
 	authorizePeer = () => true,
 	localPeers = () => [],
+	directApprovalRetryMs = 500,
 	logger = console,
 } = {}) {
 	if (!node || typeof node.registerService !== 'function') {
@@ -163,8 +164,13 @@ export function createWebvmNostrPubsubService({
 	if (typeof localPeers !== 'function') {
 		throw new TypeError('WebVM local FIPS peers must be provided by a function');
 	}
+	if (!Number.isSafeInteger(directApprovalRetryMs) || directApprovalRetryMs <= 0) {
+		throw new TypeError('WebVM direct approval retry interval must be a positive integer');
+	}
 	const relayUrls = validateRelayClients(relayClients);
 	const pendingDirectApprovals = new Map();
+	let directApprovalSendTail = Promise.resolve();
+	let stopped = false;
 	const stats = {
 		subscriptionBatches: 0,
 		relaySubscriptions: 0,
@@ -181,35 +187,51 @@ export function createWebvmNostrPubsubService({
 		directApprovalAcks: 0,
 		directApprovalAckReplays: 0,
 		directRouteRegistrations: 0,
+		lastDirectRoutePeer: '',
 		recentSubscriptionFilters: [],
 		recentRelayEvents: [],
 	};
-	const rememberDirectApproval = (approval, upstreamPeer) => {
+	const forgetDirectApproval = (recipient) => {
+		const pending = pendingDirectApprovals.get(recipient);
+		if (pending?.retryTimer) clearTimeout(pending.retryTimer);
+		pendingDirectApprovals.delete(recipient);
+	};
+	const sendDirectApprovalDatagram = (datagram) => {
+		const sent = directApprovalSendTail.then(() => node.sendDatagram(datagram));
+		directApprovalSendTail = sent.catch(() => {});
+		return sent;
+	};
+	const rememberDirectApproval = (approval, upstreamPeer, downstreamPeer) => {
 		const now = Date.now();
 		for (const [recipient, pending] of pendingDirectApprovals) {
-			if (pending.expiresAt <= now) pendingDirectApprovals.delete(recipient);
+			if (pending.expiresAt <= now) forgetDirectApproval(recipient);
 		}
-		const previous = pendingDirectApprovals.get(approval.recipient);
-		const frames = previous?.expiresAt > now ? previous.frames : [];
-		const upstreamPeers = previous?.expiresAt > now
-			? previous.upstreamPeers
-			: new Set();
-		upstreamPeers.add(upstreamPeer);
-		if (!frames.some((frame) => frame.length === approval.frame.length
+		let pending = pendingDirectApprovals.get(approval.recipient);
+		if (!pending) {
+			pending = {
+				frames: [],
+				upstreamPeers: new Set(),
+				ack: null,
+				downstreamPeer,
+				retryTimer: null,
+				expiresAt: now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS,
+			};
+			pendingDirectApprovals.set(approval.recipient, pending);
+		}
+		pending.upstreamPeers.add(upstreamPeer);
+		pending.downstreamPeer = downstreamPeer;
+		pending.expiresAt = now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS;
+		if (!pending.frames.some((frame) => frame.length === approval.frame.length
 			&& frame.every((byte, index) => byte === approval.frame[index]))) {
-			frames.push(approval.frame.slice());
-			if (frames.length > MAX_PENDING_DIRECT_APPROVAL_FRAMES) frames.shift();
+			pending.frames.push(approval.frame.slice());
+			if (pending.frames.length > MAX_PENDING_DIRECT_APPROVAL_FRAMES) {
+				pending.frames.shift();
+			}
 		}
-		pendingDirectApprovals.set(approval.recipient, {
-			frames,
-			upstreamPeers,
-			ack: previous?.expiresAt > now ? previous.ack : null,
-			expiresAt: now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS,
-		});
 		while (pendingDirectApprovals.size > MAX_PENDING_DIRECT_APPROVAL_RECIPIENTS) {
-			pendingDirectApprovals.delete(pendingDirectApprovals.keys().next().value);
+			forgetDirectApproval(pendingDirectApprovals.keys().next().value);
 		}
-		return pendingDirectApprovals.get(approval.recipient);
+		return pending;
 	};
 	const replayDirectApproval = async (peer) => {
 		const recipient = xOnlyPeerIdentity(peer);
@@ -217,11 +239,12 @@ export function createWebvmNostrPubsubService({
 		const pending = pendingDirectApprovals.get(recipient);
 		if (!pending) return;
 		if (pending.expiresAt <= Date.now()) {
-			pendingDirectApprovals.delete(recipient);
+			forgetDirectApproval(recipient);
 			return;
 		}
+		if (pending.ack) return;
 		for (const frame of pending.frames) {
-			await node.sendDatagram({
+			await sendDirectApprovalDatagram({
 				dst: peer,
 				srcPort: DIRECT_JOIN_APPROVAL_PORT,
 				dstPort: DIRECT_JOIN_APPROVAL_PORT,
@@ -230,18 +253,39 @@ export function createWebvmNostrPubsubService({
 			stats.directApprovalReplays += 1;
 		}
 	};
+	const scheduleDirectApprovalReplay = (recipient) => {
+		const pending = pendingDirectApprovals.get(recipient);
+		if (stopped || !pending || pending.ack || pending.retryTimer) return;
+		pending.retryTimer = setTimeout(async () => {
+			pending.retryTimer = null;
+			if (stopped || pendingDirectApprovals.get(recipient) !== pending || pending.ack) return;
+			try {
+				await replayDirectApproval(pending.downstreamPeer);
+			} catch (error) {
+				stats.serviceErrors += 1;
+				stats.serviceErrorOperations['direct-approval-replay'] =
+					(stats.serviceErrorOperations['direct-approval-replay'] || 0) + 1;
+				stats.lastServiceError = classifyServiceError(error);
+				stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
+				logger.warn?.('WebVM direct approval replay failed', error);
+			}
+			scheduleDirectApprovalReplay(recipient);
+		}, directApprovalRetryMs);
+	};
 	const forwardApprovalAck = async (peer, payload) => {
 		const recipient = xOnlyPeerIdentity(peer);
 		if (!recipient) return false;
 		const pending = pendingDirectApprovals.get(recipient);
 		if (!pending || pending.expiresAt <= Date.now()) {
-			pendingDirectApprovals.delete(recipient);
+			forgetDirectApproval(recipient);
 			return false;
 		}
 		pending.ack = payload.slice();
+		if (pending.retryTimer) clearTimeout(pending.retryTimer);
+		pending.retryTimer = null;
 		pending.expiresAt = Date.now() + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS;
 		for (const upstreamPeer of pending.upstreamPeers) {
-			await node.sendDatagram({
+			await sendDirectApprovalDatagram({
 				dst: upstreamPeer,
 				srcPort: DIRECT_JOIN_APPROVAL_PORT,
 				dstPort: DIRECT_JOIN_APPROVAL_PORT,
@@ -265,7 +309,13 @@ export function createWebvmNostrPubsubService({
 						&& context?.dstPort === port
 						&& isApprovalRouteRegistration(context.payload)) {
 						stats.directRouteRegistrations += 1;
-						await replayDirectApproval(context.src);
+						stats.lastDirectRoutePeer = String(context.src || '').toLowerCase();
+						const recipient = xOnlyPeerIdentity(context.src);
+						const pending = recipient && pendingDirectApprovals.get(recipient);
+						if (pending) {
+							pending.downstreamPeer = context.src;
+							scheduleDirectApprovalReplay(recipient);
+						}
 						return;
 					}
 					return handler(context);
@@ -278,9 +328,9 @@ export function createWebvmNostrPubsubService({
 						(peer) => xOnlyPeerIdentity(peer) === approval.recipient,
 					);
 					if (!dst) throw new Error('WebVM local FIPS approval recipient is unavailable');
-					const pending = rememberDirectApproval(approval, context.src);
+					const pending = rememberDirectApproval(approval, context.src, dst);
 					if (pending.ack) {
-						await node.sendDatagram({
+						await sendDirectApprovalDatagram({
 							dst: context.src,
 							srcPort: port,
 							dstPort: port,
@@ -289,13 +339,14 @@ export function createWebvmNostrPubsubService({
 						stats.directApprovalAckReplays += 1;
 						return;
 					}
-					await node.sendDatagram({
+					await sendDirectApprovalDatagram({
 						dst,
 						srcPort: port,
 						dstPort: port,
 						payload: approval.frame,
 					});
 					stats.directApprovalForwards += 1;
+					scheduleDirectApprovalReplay(approval.recipient);
 					return;
 				}
 				stats.unauthorizedPeers += 1;
@@ -322,7 +373,6 @@ export function createWebvmNostrPubsubService({
 	});
 	service.start();
 
-	let stopped = false;
 	return {
 		service,
 		stats,
@@ -330,6 +380,7 @@ export function createWebvmNostrPubsubService({
 		async stop() {
 			if (stopped) return;
 			stopped = true;
+			for (const recipient of pendingDirectApprovals.keys()) forgetDirectApproval(recipient);
 			pendingDirectApprovals.clear();
 			await service.stop();
 		},

@@ -11,7 +11,7 @@
 		"preview": "vite preview --host 127.0.0.1",
 		"perf:startup": "node scripts/measure-v86-startup.mjs",
 		"test:e2e": "npm run build && playwright test",
-    "test:release": "npm run build && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/v86-route.spec.js tests/e2e/v86-persistence-real.spec.js tests/e2e/v86-entropy-real.spec.js tests/e2e/webvm-nostr-pubsub-service.spec.js && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/webvm-native-nostr-vpn.spec.js",
+		"test:release": "npm run build && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/v86-route.spec.js tests/e2e/v86-persistence-real.spec.js tests/e2e/v86-entropy-real.spec.js tests/e2e/webvm-nostr-pubsub-service.spec.js && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/webvm-native-nostr-vpn.spec.js",
 		"test:production": "playwright test --config playwright.production.config.js",
 		"deploy:webvm": "node scripts/deploy-webvm.mjs",
 		"deploy:webvm:dry-run": "node scripts/deploy-webvm.mjs --dry-run"
@@ -33,9 +33,9 @@
 	},
 	"type": "module",
 	"dependencies": {
-    "@fips/core": "file:vendor/fips/fips-core-0.0.21.tgz",
-    "@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.20.tgz",
-    "@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.31.tgz",
+		"@fips/core": "file:vendor/fips/fips-core-0.0.22.tgz",
+		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.21.tgz",
+		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.32.tgz",
 		"nostr-pubsub": "file:vendor/nostr-pubsub-0.1.2.tgz",
 		"nostr-tools": "^2.23.9",
 		"v86": "^0.5.424"
