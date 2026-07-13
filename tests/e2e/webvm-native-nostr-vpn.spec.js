@@ -264,6 +264,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.autoConnect,
 		)).toBe(true);
 		expect(await page.evaluate(
+			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.advertiseOnNostr,
+		)).toBe(true);
+		expect(await page.evaluate(
 			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxConnections,
 		)).toBe(16);
 		expect(await page.evaluate(

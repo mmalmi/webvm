@@ -69,9 +69,10 @@ export async function createWebvmFipsHost({
 		relayClients: sharedRelayClients,
 		stunServers,
 		discoveryApp,
-		// WebVM identities are ephemeral leaves. They discover durable ingress
-		// adverts but do not leave stale browser-presence adverts after reloads.
-		advertiseOnNostr: false,
+		// The browser identity survives reloads, so advertise it and refresh the
+		// advert while this tab is alive. Mesh peers can then reconnect inbound
+		// through these configured relays instead of stale third-party relays.
+		advertiseOnNostr: true,
 		// Roster peers are often behind an ingress and do not advertise WebRTC
 		// themselves. Reconnect proven ingresses first, while keeping enough
 		// parallel capacity to find a healthy ingress on a fresh browser.
