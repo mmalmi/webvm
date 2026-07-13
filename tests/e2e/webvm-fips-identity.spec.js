@@ -11,6 +11,7 @@ import {
 	loadPreferredWebvmFipsIngresses,
 	rememberWebvmFipsIngress,
 } from '../../src/lib/webvmFipsIngress.js';
+import { decodeMeshIngressHint } from '../../src/lib/webvmNostrPubsubService.js';
 
 class MemoryStorage {
 	values = new Map();
@@ -74,4 +75,13 @@ test('WebVM ignores the ingress cache populated by arbitrary v1 connections', ()
 	storage.values.set('iris-webvm:fips-ingress-peers:v1', JSON.stringify([arbitraryPeer]));
 
 	expect(loadPreferredWebvmFipsIngresses(storage)).toEqual([]);
+});
+
+test('WebVM decodes the rostered mesh ingress announced by its local guest', () => {
+	const hintedPeer = new Uint8Array(32).fill(0x5a);
+	const payload = new Uint8Array(9 + hintedPeer.length);
+	payload.set(new TextEncoder().encode('NVPNMESH1'));
+	payload.set(hintedPeer, 9);
+
+	expect(decodeMeshIngressHint(payload)).toBe('5a'.repeat(32));
 });

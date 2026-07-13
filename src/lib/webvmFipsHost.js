@@ -1,5 +1,7 @@
 import {
 	FipsNode,
+	deriveNodeAddr,
+	fromHex,
 	nodeAddrToHex,
 	noopLogger,
 	toHex,
@@ -95,12 +97,28 @@ export async function createWebvmFipsHost({
 		logger,
 	});
 	const localEthernetPeers = new Set();
+	const hintedIngressConnects = new Map();
+	const connectHintedIngress = (xOnlyPubkey) => {
+		if (hintedIngressConnects.has(xOnlyPubkey)) return;
+		const pending = (async () => {
+			const hinted = await webrtc.resolve(deriveNodeAddr(fromHex(`02${xOnlyPubkey}`)));
+			if (!hinted) return;
+			await node.connect(hinted.remoteAddr);
+			rememberWebvmFipsIngress(hinted.remoteAddr.addr);
+		})().catch((error) => {
+			logger.debug('WebVM mesh ingress hint did not connect', xOnlyPubkey, error);
+		}).finally(() => {
+			hintedIngressConnects.delete(xOnlyPubkey);
+		});
+		hintedIngressConnects.set(xOnlyPubkey, pending);
+	};
 	const pubsub = createWebvmNostrPubsubService({
 		node,
 		relayClients: sharedRelayClients,
 		authorizePeer: (peer) => localEthernetPeers.has(peer),
 		localPeers: () => [...localEthernetPeers],
 		onDirectApprovalPeer: rememberWebvmFipsIngress,
+		onMeshIngressHint: connectHintedIngress,
 		logger,
 	});
 	const webrtcPeerKeys = new Set();

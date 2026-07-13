@@ -4,6 +4,7 @@ const DIRECT_JOIN_APPROVAL_PORT = 7368;
 const DIRECT_JOIN_APPROVAL_ROUTE_MAGIC = new TextEncoder().encode('NVPNFWD1');
 const DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION = new TextEncoder().encode('NVPNPAIR1');
 const DIRECT_JOIN_APPROVAL_ACK_MAGIC = new TextEncoder().encode('NVPNACK1');
+const MESH_INGRESS_HINT_MAGIC = new TextEncoder().encode('NVPNMESH1');
 const DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES = DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.length + 32;
 const DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_PENDING_DIRECT_APPROVAL_FRAMES = 4;
@@ -43,6 +44,17 @@ function isApprovalAppliedAck(payload) {
 	return payload instanceof Uint8Array
 		&& payload.length > DIRECT_JOIN_APPROVAL_ACK_MAGIC.length
 		&& DIRECT_JOIN_APPROVAL_ACK_MAGIC.every((byte, index) => payload[index] === byte);
+}
+
+export function decodeMeshIngressHint(payload) {
+	if (!(payload instanceof Uint8Array)
+		|| payload.length !== MESH_INGRESS_HINT_MAGIC.length + 32
+		|| !MESH_INGRESS_HINT_MAGIC.every((byte, index) => payload[index] === byte)) {
+		return null;
+	}
+	return [...payload.slice(MESH_INGRESS_HINT_MAGIC.length)]
+		.map((byte) => byte.toString(16).padStart(2, '0'))
+		.join('');
 }
 
 function xOnlyPeerIdentity(peer) {
@@ -153,6 +165,7 @@ export function createWebvmNostrPubsubService({
 	authorizePeer = () => true,
 	localPeers = () => [],
 	onDirectApprovalPeer = () => {},
+	onMeshIngressHint = () => {},
 	directApprovalRetryMs = 500,
 	logger = console,
 } = {}) {
@@ -167,6 +180,9 @@ export function createWebvmNostrPubsubService({
 	}
 	if (typeof onDirectApprovalPeer !== 'function') {
 		throw new TypeError('WebVM direct approval peer observer must be a function');
+	}
+	if (typeof onMeshIngressHint !== 'function') {
+		throw new TypeError('WebVM mesh ingress hint observer must be a function');
 	}
 	if (!Number.isSafeInteger(directApprovalRetryMs) || directApprovalRetryMs <= 0) {
 		throw new TypeError('WebVM direct approval retry interval must be a positive integer');
@@ -191,6 +207,7 @@ export function createWebvmNostrPubsubService({
 		directApprovalAcks: 0,
 		directApprovalAckReplays: 0,
 		directRouteRegistrations: 0,
+		meshIngressHints: 0,
 		lastDirectRoutePeer: '',
 		recentSubscriptionFilters: [],
 		recentRelayEvents: [],
@@ -303,6 +320,15 @@ export function createWebvmNostrPubsubService({
 		registerService(port, handler) {
 			return node.registerService(port, async (context) => {
 				if (authorizePeer(String(context?.src || '').toLowerCase())) {
+					const meshIngress = port === DIRECT_JOIN_APPROVAL_PORT
+						&& context?.dstPort === port
+						? decodeMeshIngressHint(context.payload)
+						: null;
+					if (meshIngress) {
+						stats.meshIngressHints += 1;
+						onMeshIngressHint(meshIngress);
+						return;
+					}
 					if (port === DIRECT_JOIN_APPROVAL_PORT
 						&& context?.dstPort === port
 						&& isApprovalAppliedAck(context.payload)
