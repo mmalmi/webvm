@@ -360,5 +360,6 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 	} finally {
 		admin.stop();
 		isolated.cleanup();
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
 	}
 });
