@@ -4,6 +4,7 @@
 	import VmToolbar from '$lib/VmToolbar.svelte';
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
+	import { clearPreferredWebvmFipsIngresses } from '$lib/webvmFipsIngress.js';
 	import { attachWebvmDisk } from '$lib/webvmDisk.js';
 	import '$lib/global.css';
 	import '@xterm/xterm/css/xterm.css';
@@ -275,6 +276,7 @@ ${WELCOME_BORDER}
 		diskStatus = 'resetting';
 		await diskController?.reset();
 		clearWebvmFipsIdentity();
+		clearPreferredWebvmFipsIngresses();
 		globalThis.location.reload();
 	}
 

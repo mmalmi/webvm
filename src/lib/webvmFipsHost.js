@@ -12,6 +12,10 @@ import {
 } from '@fips/transport-webrtc';
 import { createV86EthernetFramePort } from '$lib/v86EthernetFramePort.js';
 import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
+import {
+	loadPreferredWebvmFipsIngresses,
+	rememberWebvmFipsIngress,
+} from '$lib/webvmFipsIngress.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
 export const DEFAULT_FIPS_RELAYS = Object.freeze([
@@ -45,6 +49,7 @@ export async function createWebvmFipsHost({
 	onStatus = () => {},
 } = {}) {
 	const identity = await loadOrCreateWebvmFipsIdentity();
+	const preferredIngresses = loadPreferredWebvmFipsIngresses();
 	const sharedRelayClients = relayClients || relays.map((url) => new NostrRelayClient({
 		url,
 		logger,
@@ -67,12 +72,14 @@ export async function createWebvmFipsHost({
 		// WebVM identities are ephemeral leaves. They discover durable ingress
 		// adverts but do not leave stale browser-presence adverts after reloads.
 		advertiseOnNostr: false,
-		// The guest emits destination-specific FIPS lookups for its roster. Let
-		// those resolve the exact ingress instead of spending connection slots on
-		// unrelated public adverts or dead signaling relays.
-		autoConnect: false,
+		// Roster peers are often behind an ingress and do not advertise WebRTC
+		// themselves. Reconnect proven ingresses first, while keeping enough
+		// parallel capacity to find a healthy ingress on a fresh browser.
+		autoConnect: true,
 		acceptConnections: true,
 		maxConnections: 16,
+		maxAutoConnections: 4,
+		preferredAutoConnectPeers: preferredIngresses,
 		connectTimeoutMs: 12_000,
 		iceGatherTimeoutMs: 2_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
@@ -122,7 +129,10 @@ export async function createWebvmFipsHost({
 			}
 		}
 		if (event?.remoteAddr?.transport === 'webrtc') {
-			if (connected) webrtcPeerKeys.add(peer);
+			if (connected) {
+				webrtcPeerKeys.add(peer);
+				rememberWebvmFipsIngress(peer);
+			}
 			else webrtcPeerKeys.delete(peer);
 		}
 		ethernetPeers = localEthernetPeers.size;

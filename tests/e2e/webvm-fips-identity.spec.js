@@ -6,6 +6,11 @@ import {
 	clearWebvmFipsIdentity,
 	loadOrCreateWebvmFipsIdentity,
 } from '../../src/lib/webvmFipsIdentity.js';
+import {
+	clearPreferredWebvmFipsIngresses,
+	loadPreferredWebvmFipsIngresses,
+	rememberWebvmFipsIngress,
+} from '../../src/lib/webvmFipsIngress.js';
 
 class MemoryStorage {
 	values = new Map();
@@ -44,4 +49,21 @@ test('WebVM refuses to silently replace a damaged persisted FIPS identity', asyn
 
 	await expect(loadOrCreateWebvmFipsIdentity({ storage, crypto: webcrypto }))
 		.rejects.toThrow('invalid persisted WebVM FIPS identity');
+});
+
+test('WebVM reconnects its most recently successful FIPS ingresses first', () => {
+	const storage = new MemoryStorage();
+	const peers = Array.from({ length: 6 }, (_, index) =>
+		`02${(index + 1).toString(16).padStart(64, '0')}`);
+	for (const peer of peers) rememberWebvmFipsIngress(peer, storage);
+	rememberWebvmFipsIngress(peers[3], storage);
+
+	expect(loadPreferredWebvmFipsIngresses(storage)).toEqual([
+		peers[3],
+		peers[5],
+		peers[4],
+		peers[2],
+	]);
+	clearPreferredWebvmFipsIngresses(storage);
+	expect(loadPreferredWebvmFipsIngresses(storage)).toEqual([]);
 });

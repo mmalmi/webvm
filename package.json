@@ -35,7 +35,7 @@
 	"dependencies": {
 		"@fips/core": "file:vendor/fips/fips-core-0.0.22.tgz",
 		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.21.tgz",
-		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.32.tgz",
+		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.33.tgz",
 		"nostr-pubsub": "file:vendor/nostr-pubsub-0.1.2.tgz",
 		"nostr-tools": "^2.23.9",
 		"v86": "^0.5.424"

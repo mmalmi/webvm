@@ -262,10 +262,13 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		);
 		expect(await page.evaluate(
 			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.autoConnect,
-		)).toBe(false);
+		)).toBe(true);
 		expect(await page.evaluate(
 			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxConnections,
 		)).toBe(16);
+		expect(await page.evaluate(
+			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxAutoConnections,
+		)).toBe(4);
 		const browserHostPublicKey = await page.evaluate(
 			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
 		);
@@ -350,6 +353,12 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
 		expect(guestOutput).toContain('via mesh');
 		expect(guestOutput).not.toContain('ping: bad address');
+		expect(await page.evaluate(() => {
+			const preferred = JSON.parse(
+				localStorage.getItem('iris-webvm:fips-ingress-peers:v1') || '[]',
+			);
+			return preferred.length;
+		})).toBeGreaterThanOrEqual(1);
 		const afterApproval = await captureDeliveryState();
 		await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
 		const reloadStartedAt = Date.now();
