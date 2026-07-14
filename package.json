@@ -4,14 +4,15 @@
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
-		"lint": "node scripts/check-source-quality.mjs",
+		"verify:dependencies": "node scripts/verify-vendored-dependencies.mjs",
+		"lint": "npm run verify:dependencies && node scripts/check-source-quality.mjs",
 		"build": "node scripts/assert-v86-guest-assets.mjs && vite build",
 		"guest:build": "bash scripts/build-v86-guest.sh && npm run state:build",
 		"state:build": "node scripts/build-v86-state.mjs",
 		"preview": "vite preview --host 127.0.0.1",
 		"perf:startup": "node scripts/measure-v86-startup.mjs",
 		"test:e2e": "npm run build && playwright test",
-		"test:release": "npm run build && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/v86-route.spec.js tests/e2e/v86-persistence-real.spec.js tests/e2e/v86-entropy-real.spec.js tests/e2e/webvm-fips-identity.spec.js tests/e2e/webvm-nostr-pubsub-service.spec.js && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/webvm-native-nostr-vpn.spec.js",
+		"test:release": "npm run lint && npm run build && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/v86-route.spec.js tests/e2e/v86-persistence-real.spec.js tests/e2e/v86-entropy-real.spec.js tests/e2e/webvm-fips-identity.spec.js tests/e2e/webvm-nostr-pubsub-service.spec.js && NVPN_WEBVM_REAL_E2E=1 playwright test tests/e2e/webvm-native-nostr-vpn.spec.js",
 		"test:production": "playwright test --config playwright.production.config.js",
 		"deploy:webvm": "node scripts/deploy-webvm.mjs",
 		"deploy:webvm:dry-run": "node scripts/deploy-webvm.mjs --dry-run"
