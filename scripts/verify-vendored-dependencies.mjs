@@ -8,10 +8,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APPROVED_PACKAGES = [
 	{
 		name: 'nostr-pubsub',
-		version: '0.1.4',
-		path: 'vendor/nostr-pubsub-0.1.4.tgz',
-		sha256: '676e101e71e71dc5b67d3f41d3a40576354abf9261b43020fd630dc92666dae7',
-		sha512: 'Rm0e+UC1YBnjPjgHED0t+S6+ytUjz9l1ld1AiFiilpC2OU1HDZxtUUrJTjupoe97v6NUUhywkoNNLrZ9LHB9HA==',
+		version: '0.1.5',
+		path: 'vendor/nostr-pubsub-0.1.5.tgz',
+		sha256: '0c9cb7ec3ae0acbf516881ec76cc14f4f623ee0be5619494f38cce62aafe72b7',
+		sha512: 'zza+r1FWKMopO4XUxLD0GfnBvUOpNju9Pr4nKCZ8np8xqo0sKDaCcbM/VvZmjNd2/iHdtyducpkrmAXnqUt+9w==',
 	},
 	{
 		name: '@fips/transport-webrtc',
