@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
-	'build/favicon.svg',
+	'build/favicon.ico',
 	'build/v86/v86.wasm',
 	'build/v86/seabios.bin',
 	'build/v86/vgabios.bin',
