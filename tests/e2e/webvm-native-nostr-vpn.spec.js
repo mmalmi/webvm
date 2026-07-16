@@ -235,15 +235,6 @@ async function startAndScanJoinRequest(page) {
 
 test('admin approval reaches WebVM directly over FIPS without relay traffic', async ({ page }) => {
 	test.setTimeout(420_000);
-	// The production Worker sends this response directive for rootfs chunks.
-	// Mirror it in Vite preview so Chromium never needs a disk-cache write to boot.
-	await page.route('**/v86/guest/rootfs/*.bin.zst', async (route) => {
-		const response = await route.fetch();
-		await route.fulfill({
-			response,
-			headers: { ...response.headers(), 'cache-control': 'no-store' },
-		});
-	});
 	const browserMessages = [];
 	page.on('console', (message) => {
 		browserMessages.push(`${message.type()}: ${message.text()}`);

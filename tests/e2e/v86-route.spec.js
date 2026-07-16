@@ -105,6 +105,9 @@ function installMockV86(page) {
 				window.__v86RouteTestState.hostCalls.push({
 					sameEmulator: emulator === window.__v86RouteTestState.emulator,
 				});
+				if (new URLSearchParams(window.location.search).has('stalled-fips')) {
+					return new Promise(() => {});
+				}
 				onStatus({
 					state: 'ready',
 					error: '',
@@ -122,6 +125,15 @@ function installMockV86(page) {
 		};
 	});
 }
+
+test('v86 boots the guest without waiting indefinitely for FIPS startup', async ({ page }) => {
+	await installMockV86(page);
+	await page.goto('/v86?cold-boot&stalled-fips');
+
+	await expect.poll(() => page.evaluate(() => window.__v86RouteTestState.ran)).toBe(true);
+	expect(await page.evaluate(() => window.__v86RouteTestState.hostCalls))
+		.toEqual([{ sameEmulator: true }]);
+});
 
 test('v86 boots only same-origin guest assets and starts the generic FIPS host', async ({ page }) => {
 	await installMockV86(page);

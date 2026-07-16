@@ -6,6 +6,7 @@
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 	import { clearPreferredWebvmFipsIngresses } from '$lib/webvmFipsIngress.js';
 	import { attachWebvmDisk } from '$lib/webvmDisk.js';
+	import { installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
 	import '$lib/global.css';
 	import '@xterm/xterm/css/xterm.css';
 
@@ -16,6 +17,7 @@
 	const GUEST_ROOTFS_URL = '/v86/guest/rootfs/';
 	const GUEST_MANIFEST_URL = '/v86/guest/manifest.json';
 	const GUEST_STATE_MANIFEST_URL = '/v86/guest/state/manifest.json';
+	const FIPS_STARTUP_BOOT_GRACE_MS = 2_000;
 	const SERIAL_BUFFER_LIMIT = 128 * 1024;
 	const WELCOME_BORDER = '+----------------------------------------------------------------------------+';
 	const RESUME_READY_MARKER = '__IRIS_WEBVM_RESUMED__';
@@ -52,6 +54,7 @@ ${WELCOME_BORDER}
 	let diskUsageBytes = null;
 	let resettingVm = false;
 	let fipsHost = null;
+	let restoreRootfsFetch = null;
 	let terminalReady = false;
 	let startupOutput = '';
 	let resumeRequested = false;
@@ -299,14 +302,22 @@ ${WELCOME_BORDER}
 	async function startFipsHost(instance) {
 		const hook = getTestHooks()?.createFipsHost;
 		const createHost = hook || createWebvmFipsHost;
-		fipsHost = await createHost({
+		fipsStatus = { ...fipsStatus, state: 'starting', error: '' };
+		publishDebugState();
+		const host = await createHost({
 			emulator: instance,
 			logger: localDiagnosticsEnabled() ? console : undefined,
 			onStatus(status) {
+				if (destroyed) return;
 				fipsStatus = status;
 				publishDebugState();
 			},
 		});
+		if (destroyed) {
+			await host?.stop?.();
+			return;
+		}
+		fipsHost = host;
 	}
 
 	async function bootV86() {
@@ -359,16 +370,19 @@ ${WELCOME_BORDER}
 			vmState = 'created';
 			vmSummary = 'WebVM initialized';
 			publishDebugState();
-			try {
-				await startFipsHost(instance);
-			} catch (error) {
+			const fipsStartup = startFipsHost(instance).catch((error) => {
+				if (destroyed) return;
 				fipsStatus = {
 					...fipsStatus,
 					state: 'failed',
 					error: messageFromError(error),
 				};
 				publishDebugState();
-			}
+			});
+			await Promise.race([
+				fipsStartup,
+				new Promise((resolve) => setTimeout(resolve, FIPS_STARTUP_BOOT_GRACE_MS)),
+			]);
 
 			const state = await statePromise;
 			await emulatorReady;
@@ -405,6 +419,7 @@ ${WELCOME_BORDER}
 	}
 
 	onMount(() => {
+		restoreRootfsFetch = installRootfsFetchCacheFallback();
 		publishDebugState();
 		void initializeSerialTerminal().then(() => bootV86());
 	});
@@ -422,6 +437,8 @@ ${WELCOME_BORDER}
 		serialTerminal = null;
 		diskController?.dispose();
 		diskController = null;
+		restoreRootfsFetch?.();
+		restoreRootfsFetch = null;
 		void fipsHost?.stop?.();
 		void emulator?.destroy?.();
 		if (localDiagnosticsEnabled()) delete globalThis.irisWebvmV86;
