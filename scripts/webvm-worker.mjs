@@ -11,16 +11,25 @@ const CROSS_ORIGIN_HEADERS = {
 	'X-Frame-Options': 'DENY',
 };
 
-const ROOTFS_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const DOCUMENT_CACHE_CONTROL = 'no-store';
+const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 const CONTENT_ADDRESSED_ROOTFS_PATH = /^\/v86\/guest\/rootfs\/[0-9a-f]{8}\.bin\.zst$/u;
+const CONTENT_ADDRESSED_APP_PATH = /^\/_app\/immutable\//u;
 
 function withWebVmHeaders(response, url) {
 	const headers = new Headers(response.headers);
 	for (const [name, value] of Object.entries(CROSS_ORIGIN_HEADERS)) {
 		headers.set(name, value);
 	}
-	if (CONTENT_ADDRESSED_ROOTFS_PATH.test(url.pathname)) {
-		headers.set('Cache-Control', ROOTFS_CACHE_CONTROL);
+	if (headers.get('content-type')?.toLowerCase().startsWith('text/html')) {
+		headers.set('Cache-Control', DOCUMENT_CACHE_CONTROL);
+		headers.set('Cloudflare-CDN-Cache-Control', DOCUMENT_CACHE_CONTROL);
+	} else if (
+		response.ok
+		&& (CONTENT_ADDRESSED_ROOTFS_PATH.test(url.pathname)
+			|| CONTENT_ADDRESSED_APP_PATH.test(url.pathname))
+	) {
+		headers.set('Cache-Control', IMMUTABLE_CACHE_CONTROL);
 	}
 
 	return new Response(response.body, {

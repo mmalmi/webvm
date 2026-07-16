@@ -29,13 +29,15 @@ test('WebVM Worker isolates the privileged VM origin', async () => {
 	expect(response.headers.get('x-frame-options')).toBe('DENY');
 	expect(response.headers.get('referrer-policy')).toBe('no-referrer');
 	expect(response.headers.get('permissions-policy')).toContain('camera=()');
+	expect(response.headers.get('cache-control')).toBe('no-store');
+	expect(response.headers.get('cloudflare-cdn-cache-control')).toBe('no-store');
 	const csp = response.headers.get('content-security-policy') || '';
 	expect(csp).toBe("frame-ancestors 'none'");
 	expect(csp).not.toContain('plausible.leaningtech.com');
 	expect(await response.text()).toContain(appCsp);
 });
 
-test('WebVM Worker caches content-addressed rootfs chunks as immutable', async () => {
+test('WebVM Worker caches only content-addressed assets as immutable', async () => {
 	const defaultCacheControl = 'public, max-age=0, must-revalidate';
 	const assets = {
 		fetch: () => new Response('asset', {
@@ -50,7 +52,12 @@ test('WebVM Worker caches content-addressed rootfs chunks as immutable', async (
 		new Request('https://webvm.iris.to/v86/guest/fs.json'),
 		{ ASSETS: assets },
 	);
+	const appChunk = await worker.fetch(
+		new Request('https://webvm.iris.to/_app/immutable/chunks/example.js'),
+		{ ASSETS: assets },
+	);
 
 	expect(chunk.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+	expect(appChunk.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
 	expect(manifest.headers.get('cache-control')).toBe(defaultCacheControl);
 });
