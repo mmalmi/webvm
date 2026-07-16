@@ -2,13 +2,30 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-NVPN_REPO=${NVPN_REPO_PATH:-$ROOT/../nostr-vpn}
-HASHTREE_REPO=${HASHTREE_REPO_PATH:-$ROOT/../hashtree}
-FIPS_REPO=${FIPS_REPO_PATH:-$ROOT/../fips}
-V86_REPO=${V86_REPO_PATH:-$ROOT/../v86}
-TARGET=i686-unknown-linux-musl
-NVPN_TARGET_DIR=${NVPN_LINUX_MUSL_TARGET_DIR:-$HOME/.cache/cargo-target/nvpn-webvm}
-HTREE_TARGET_DIR=${HTREE_TARGET_DIR:-${CARGO_TARGET_DIR:-$HOME/.cache/cargo-target}}
+
+require_input() {
+  local name=$1
+  if [[ -z ${!name:-} ]]; then
+    printf '%s is required\n' "$name" >&2
+    exit 1
+  fi
+}
+
+for name in \
+  NVPN_REPO_PATH \
+  HASHTREE_REPO_PATH \
+  FIPS_REPO_PATH \
+  V86_REPO_PATH \
+  NVPN_BINARY \
+  HTREE_BINARY \
+  GIT_REMOTE_HTREE_BINARY; do
+  require_input "$name"
+done
+
+NVPN_REPO=$NVPN_REPO_PATH
+HASHTREE_REPO=$HASHTREE_REPO_PATH
+FIPS_REPO=$FIPS_REPO_PATH
+V86_REPO=$V86_REPO_PATH
 OUTPUT_DIR=${V86_GUEST_OUTPUT_DIR:-$ROOT/custom-disk-images/v86-guest}
 STAGE_DIR=$(mktemp -d "$ROOT/custom-disk-images/.v86-guest-stage.XXXXXX")
 IMAGE=iris-webvm-v86-guest:i686
@@ -34,48 +51,12 @@ for path in \
   fi
 done
 
-if [[ -n ${NVPN_BINARY:-} ]]; then
-  if [[ ! -x "$NVPN_BINARY" ]]; then
-    printf 'NVPN_BINARY is not executable: %s\n' "$NVPN_BINARY" >&2
+for binary in "$NVPN_BINARY" "$HTREE_BINARY" "$GIT_REMOTE_HTREE_BINARY"; do
+  if [[ ! -x "$binary" ]]; then
+    printf 'guest binary is not executable: %s\n' "$binary" >&2
     exit 1
   fi
-else
-  (
-    cd "$NVPN_REPO"
-    NVPN_FIPS_REPO_PATH=${NVPN_FIPS_REPO_PATH:-$FIPS_REPO} \
-      NVPN_LINUX_MUSL_TARGET_DIR="$NVPN_TARGET_DIR" \
-      NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES=${NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES:-1} \
-      NVPN_LINUX_MUSL_STRIP=${NVPN_LINUX_MUSL_STRIP:-1} \
-      scripts/build-nvpn-linux-musl "$TARGET"
-  )
-  NVPN_BINARY=$NVPN_TARGET_DIR/$TARGET/release/nvpn
-fi
-
-if [[ -n ${HTREE_BINARY:-} ]]; then
-  if [[ ! -x "$HTREE_BINARY" ]]; then
-    printf 'HTREE_BINARY is not executable: %s\n' "$HTREE_BINARY" >&2
-    exit 1
-  fi
-  GIT_REMOTE_HTREE_BINARY=${GIT_REMOTE_HTREE_BINARY:-$(dirname "$HTREE_BINARY")/git-remote-htree}
-else
-  CARGO_INCREMENTAL=0 CARGO_TARGET_DIR="$HTREE_TARGET_DIR" cargo zigbuild \
-    --manifest-path "$HASHTREE_REPO/rust/Cargo.toml" \
-    --locked \
-    -p hashtree-cli \
-    --bin htree \
-    --bin git-remote-htree \
-    --release \
-    --target "$TARGET" \
-    --no-default-features \
-    --features git-remote-wrapper
-  HTREE_BINARY=$HTREE_TARGET_DIR/$TARGET/release/htree
-  GIT_REMOTE_HTREE_BINARY=${GIT_REMOTE_HTREE_BINARY:-$HTREE_TARGET_DIR/$TARGET/release/git-remote-htree}
-fi
-
-if [[ ! -x "$GIT_REMOTE_HTREE_BINARY" ]]; then
-  printf 'GIT_REMOTE_HTREE_BINARY is not executable: %s\n' "$GIT_REMOTE_HTREE_BINARY" >&2
-  exit 1
-fi
+done
 
 require_i386_elf "$NVPN_BINARY"
 require_i386_elf "$HTREE_BINARY"

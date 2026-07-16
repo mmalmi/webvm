@@ -113,6 +113,7 @@ async function main() {
 	}
 
 	if (options.dryRun) {
+		console.log('Install frozen dependencies: npm ci');
 		console.log('Gate WebVM release: npm run test:release');
 		console.log(`Deploy WebVM Worker: npx ${deployCommand.join(' ')}`);
 		console.log(JSON.stringify(config, null, 2));
@@ -120,6 +121,12 @@ async function main() {
 	}
 
 	try {
+		const installStatus = await run('npm', ['ci'], appDir);
+		if (installStatus !== 0) {
+			process.exitCode = installStatus;
+			return;
+		}
+
 		const gateStatus = await run('npm', ['run', 'test:release'], appDir);
 		if (gateStatus !== 0) {
 			process.exitCode = gateStatus;

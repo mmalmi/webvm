@@ -1,29 +1,17 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { readBarcodes } from 'zxing-wasm/reader';
+
+import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
 
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real join-request e2e');
 test.use({ trace: 'off', viewport: { width: 1600, height: 1400 }, deviceScaleFactor: 2 });
-
-function nvpnBinary() {
-	const installedAppBinary = '/Applications/Nostr VPN.app/Contents/Resources/nvpn';
-	const sourceBinary = path.join(process.cwd(), '../nostr-vpn/target/debug/nvpn');
-	const binary = path.resolve(
-		process.env.NVPN_WEBVM_NVPN_BIN?.trim()
-			|| (existsSync(sourceBinary) ? sourceBinary : '')
-			|| installedAppBinary,
-	);
-	if (!existsSync(binary) || !statSync(binary).isFile()) {
-		throw new Error(`nVPN binary is unavailable: ${binary}`);
-	}
-	return binary;
-}
 
 function createIsolatedAdmin(nvpn) {
 	const directory = mkdtempSync(path.join(tmpdir(), 'iris-webvm-nvpn-e2e-'));
@@ -37,14 +25,11 @@ function createIsolatedAdmin(nvpn) {
 	};
 }
 
-function startAdminHelper({ configPath }) {
-	const manifest = path.resolve(
-		process.env.NVPN_APP_CORE_MANIFEST?.trim()
-			|| path.join(process.cwd(), '../nostr-vpn/crates/nostr-vpn-app-core/Cargo.toml'),
-	);
+function startAdminHelper({ configPath, manifest }) {
 	const child = spawn(process.env.CARGO || 'cargo', [
 		'run',
 		'--quiet',
+		'--locked',
 		'--manifest-path',
 		manifest,
 		'--example',
@@ -235,14 +220,24 @@ async function startAndScanJoinRequest(page) {
 
 test('admin approval reaches WebVM directly over FIPS without relay traffic', async ({ page }) => {
 	test.setTimeout(420_000);
+	const fixture = inspectNativeFixture();
+	console.log(
+		`native fixture ${fixture.sourceCommit}; nvpn ${fixture.nvpnVersion}`
+		+ ` sha256 ${fixture.nvpnSha256}; fips-core ${fixture.fipsCore.version}`
+		+ ` ${fixture.fipsCore.checksum}; fips-endpoint ${fixture.fipsEndpoint.version}`
+		+ ` ${fixture.fipsEndpoint.checksum}`,
+	);
 	const browserMessages = [];
 	page.on('console', (message) => {
 		browserMessages.push(`${message.type()}: ${message.text()}`);
 		if (browserMessages.length > 200) browserMessages.shift();
 	});
-	const nvpn = nvpnBinary();
+	const nvpn = fixture.binary;
 	const isolated = createIsolatedAdmin(nvpn);
-	const admin = startAdminHelper({ configPath: isolated.configPath });
+	const admin = startAdminHelper({
+		configPath: isolated.configPath,
+		manifest: fixture.manifest,
+	});
 	try {
 		await admin.waitForStatus('ready');
 		await page.goto('/v86');

@@ -16,7 +16,7 @@ The shipped snapshot is captured before Hashtree or Nostr VPN creates an identit
 Install dependencies and start the local app:
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
@@ -34,7 +34,14 @@ The credentialed end-to-end Nostr VPN test is skipped unless its host-test envir
 Build the Alpine i686 guest and capture a compressed, preinitialized state:
 
 ```sh
-npm run guest:build
+NVPN_REPO_PATH=<clean-nvpn-source> \
+HASHTREE_REPO_PATH=<clean-hashtree-source> \
+FIPS_REPO_PATH=<clean-fips-source> \
+V86_REPO_PATH=<clean-v86-source> \
+NVPN_BINARY=<i386-nvpn> \
+HTREE_BINARY=<i386-htree> \
+GIT_REMOTE_HTREE_BINARY=<i386-git-remote-htree> \
+  npm run guest:build
 ```
 
 When the guest filesystem is unchanged and only the saved machine state needs refreshing:

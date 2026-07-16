@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -7,20 +7,45 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APPROVED_PACKAGES = [
 	{
-		name: 'nostr-pubsub',
-		version: '0.1.5',
-		path: 'vendor/nostr-pubsub-0.1.5.tgz',
-		sha256: '0c9cb7ec3ae0acbf516881ec76cc14f4f623ee0be5619494f38cce62aafe72b7',
-		sha512: 'zza+r1FWKMopO4XUxLD0GfnBvUOpNju9Pr4nKCZ8np8xqo0sKDaCcbM/VvZmjNd2/iHdtyducpkrmAXnqUt+9w==',
+		name: '@fips/core',
+		version: '0.0.25',
+		path: 'vendor/fips/fips-core-0.0.25.tgz',
+		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.25/fips-core-0.0.25.tgz',
+		sha256: 'c76d0d853e67d7227ad47c2d9119af7265a9274a48b886d350e65c46a6d624dc',
+		sha512: 'xlD87cnd5DrzqBxl5s1l1YZxv4Xo1OumG+Pf/0X4U2TyKCmh33KP3L065djpiWlVca1uRhGppELaYT1mIZWNnw==',
+	},
+	{
+		name: '@fips/transport-ethernet',
+		version: '0.0.24',
+		path: 'vendor/fips/fips-transport-ethernet-0.0.24.tgz',
+		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.25/fips-transport-ethernet-0.0.24.tgz',
+		sha256: 'e82547afc1562687234acf0970abe943473a907a3b714706e0ce429ac469d34a',
+		sha512: 'QupttGa+aD3Obo67RF4cg2I9qlcxCWHf1mNEYWpU6Univ+pLcNC7OSfvKq67pboqlgUrBfB4yF0bt9m1qSS6yA==',
 	},
 	{
 		name: '@fips/transport-webrtc',
-		version: '0.0.39',
-		path: 'vendor/fips/fips-transport-webrtc-0.0.39.tgz',
-		sha256: '3622b7915e71836345f6f2791d7acf237bdf9daba8ce1c39abfcd7b2da939e68',
-		sha512: 'cROw8rdGxBlVvyGBeXlP4KZGlQV2NnXBbjuaUJjBUIiAVqcwHQMdxtDLoWnN84A14puREgSisxkg95RMasg+Mg==',
+		version: '0.0.41',
+		path: 'vendor/fips/fips-transport-webrtc-0.0.41.tgz',
+		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.25/fips-transport-webrtc-0.0.41.tgz',
+		sha256: '3dad45a4be6a678ecb74c6a0436f1158c21c17a071f278289ffe354ffc6277bf',
+		sha512: 'T3l48GfWLX5FWXhjHjuFvuIp74SyQUwFkux7U6uhHaaOsCOU772H6N+FeRJJSl3NnjKoWxRTBAsx+ftr2Qmj2w==',
+	},
+	{
+		name: 'nostr-pubsub',
+		version: '0.3.0',
+		path: 'vendor/nostr-pubsub-0.3.0.tgz',
+		url: 'https://github.com/mmalmi/nostr-pubsub/releases/download/nostr-pubsub-ts-v0.3.0/nostr-pubsub-0.3.0.tgz',
+		sha256: '1243ed3863ae1123b0f690bcf26e3d4fdf5a5436f8cba31202cb7b1a57a3b3c5',
+		sha512: 'ApsAMv4jaHtff8cIcDoRjPF+RpZ6cn2IFPl0iMYvliXJd/5Dtz9umh6uRHSjFvkVlCNUCyEgQ2p5IEOKRd+Mpw==',
 	},
 ];
+
+function digests(bytes) {
+	return {
+		sha256: createHash('sha256').update(bytes).digest('hex'),
+		sha512: createHash('sha512').update(bytes).digest('base64'),
+	};
+}
 
 async function readJson(file) {
 	return JSON.parse(await readFile(path.join(ROOT, file), 'utf8'));
@@ -31,15 +56,31 @@ const [manifest, lock] = await Promise.all([
 	readJson('package-lock.json'),
 ]);
 const failures = [];
+const approvedPaths = new Set(APPROVED_PACKAGES.map(({ path: archivePath }) => archivePath));
+const vendoredPaths = [];
+for (const directory of ['vendor', 'vendor/fips']) {
+	for (const entry of await readdir(path.join(ROOT, directory), { withFileTypes: true })) {
+		if (entry.isFile() && entry.name.endsWith('.tgz')) {
+			vendoredPaths.push(path.posix.join(directory, entry.name));
+		}
+	}
+}
+for (const archivePath of vendoredPaths) {
+	if (!approvedPaths.has(archivePath)) failures.push(`unapproved vendored archive: ${archivePath}`);
+}
 
 for (const approved of APPROVED_PACKAGES) {
 	const archive = await readFile(path.join(ROOT, approved.path));
 	const packageSpec = `file:${approved.path}`;
 	const locked = lock.packages?.[`node_modules/${approved.name}`];
-	const actual = {
-		sha256: createHash('sha256').update(archive).digest('hex'),
-		sha512: createHash('sha512').update(archive).digest('base64'),
-	};
+	const actual = digests(archive);
+	const source = new URL(approved.url);
+	if (source.protocol !== 'https:'
+		|| source.hostname !== 'github.com'
+		|| !source.pathname.includes('/releases/download/')
+		|| path.posix.basename(source.pathname) !== path.basename(approved.path)) {
+		failures.push(`${approved.name} source URL is not an immutable matching release asset`);
+	}
 
 	if (manifest.dependencies?.[approved.name] !== packageSpec) {
 		failures.push(`package.json must pin ${approved.name} to ${packageSpec}`);
@@ -58,6 +99,19 @@ for (const approved of APPROVED_PACKAGES) {
 	for (const algorithm of ['sha256', 'sha512']) {
 		if (actual[algorithm] !== approved[algorithm]) {
 			failures.push(`${approved.path} ${algorithm} does not match the approved archive`);
+		}
+	}
+	if (process.env.VERIFY_VENDORED_REMOTE === '1') {
+		const response = await fetch(approved.url, { redirect: 'follow' });
+		if (!response.ok) {
+			failures.push(`${approved.name} source download failed: HTTP ${response.status}`);
+		} else {
+			const remote = digests(new Uint8Array(await response.arrayBuffer()));
+			for (const algorithm of ['sha256', 'sha512']) {
+				if (remote[algorithm] !== approved[algorithm]) {
+					failures.push(`${approved.name} source ${algorithm} does not match the approved archive`);
+				}
+			}
 		}
 	}
 	console.log(`Verified ${approved.name} ${approved.version} (${actual.sha256}).`);

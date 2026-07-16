@@ -19,7 +19,14 @@ The image includes `nvpn`, `htree`, and `git-remote-htree`. Hashtree and `.fips`
 ## Build
 
 ```sh
-npm run guest:build
+NVPN_REPO_PATH=<clean-nvpn-source> \
+HASHTREE_REPO_PATH=<clean-hashtree-source> \
+FIPS_REPO_PATH=<clean-fips-source> \
+V86_REPO_PATH=<clean-v86-source> \
+NVPN_BINARY=<i386-nvpn> \
+HTREE_BINARY=<i386-htree> \
+GIT_REMOTE_HTREE_BINARY=<i386-git-remote-htree> \
+  npm run guest:build
 npm run build
 npm run test:e2e
 ```
