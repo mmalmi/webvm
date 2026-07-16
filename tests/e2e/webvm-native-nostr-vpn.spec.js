@@ -39,7 +39,12 @@ function startAdminHelper({ configPath, manifest }) {
 		configPath,
 	], {
 		cwd: path.dirname(manifest),
-		env: { ...process.env, NVPN_WEBVM_REAL_E2E: '1', RUST_LOG: 'off' },
+		env: {
+			...process.env,
+			NVPN_WEBVM_REAL_E2E: '1',
+			RUSTC_WRAPPER: '',
+			RUST_LOG: 'off',
+		},
 		stdio: ['pipe', 'pipe', 'pipe'],
 	});
 	let stdout = '';

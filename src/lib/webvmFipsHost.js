@@ -22,8 +22,6 @@ import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
 export const DEFAULT_FIPS_RELAYS = Object.freeze([
 	'wss://temp.iris.to',
-	'wss://relay.damus.io',
-	'wss://nos.lol',
 ]);
 
 export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([

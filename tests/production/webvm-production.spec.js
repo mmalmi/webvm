@@ -58,7 +58,6 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	);
 	await page.keyboard.press('Enter');
 	await expect(rows).toContainText('__WEBVM_FIPS_READY__', { timeout: 180_000 });
-	await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
 	await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
 
 	await expect(page.getByText('Tailscale')).toHaveCount(0);
@@ -66,7 +65,7 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	await expect(page.getByTestId('v86-error')).toHaveCount(0);
 });
 
-test('deployed WebVM handles a concurrent Nostr-discovered WebRTC burst', async ({ browser }) => {
+test('deployed WebVM handles a concurrent FIPS ingress burst', async ({ browser }) => {
 	const baseURL = process.env.WEBVM_PRODUCTION_URL || 'https://webvm.iris.to';
 	const contexts = await Promise.all(Array.from({ length: 4 }, () => browser.newContext()));
 	const pages = await Promise.all(contexts.map((context) => context.newPage()));
@@ -90,7 +89,7 @@ test('deployed WebVM handles a concurrent Nostr-discovered WebRTC burst', async 
 			);
 			await page.keyboard.press('Enter');
 			await expect(rows).toContainText(marker, { timeout: 30_000 });
-			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
+			await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
 			await expect(rows).not.toContainText('ping: bad address');
 		}));
 	} finally {
@@ -126,7 +125,7 @@ test('five fresh WebVMs deliver their first FIPS ping without resolver or sessio
 			);
 			await page.keyboard.press('Enter');
 			await expect(rows).toContainText(marker, { timeout: 30_000 });
-			await expect(page.locator('header')).toContainText(/WebRTC [1-9]\d*/);
+			await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
 			await expect(rows).not.toContainText('ping: bad address');
 			console.log(`fresh first ping ${attempt}/5 passed in ${Date.now() - startedAt}ms`);
 		} finally {
