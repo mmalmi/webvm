@@ -4,161 +4,23 @@ import {
 	identityFromSecretKey,
 	toHex,
 } from '@fips/core';
-import { finalizeEvent } from 'nostr-tools/pure';
 import {
 	FIPS_NOSTR_PUBSUB_SERVICE_PORT,
 	FipsPubsubWireAdapter,
 } from 'nostr-pubsub';
 
 import { createWebvmNostrPubsubService } from '../../src/lib/webvmNostrPubsubService.js';
-
-const secretKey = new Uint8Array(32).fill(7);
-const event = finalizeEvent({
-	kind: 7368,
-	created_at: 1_700_000_000,
-	tags: [['p', '1'.repeat(64)]],
-	content: 'opaque encrypted application payload',
-}, secretKey);
-const peerId = `02${event.pubkey}`;
-const routeMagic = new TextEncoder().encode('NVPNFWD1');
-const ackMagic = new TextEncoder().encode('NVPNACK1');
-
-class MemoryFipsNode {
-	services = new Map();
-	sessionListeners = new Set();
-	sent = [];
-	activeSends = 0;
-	maxConcurrentSends = 0;
-
-	constructor(sendDelayMs = 0) {
-		this.sendDelayMs = sendDelayMs;
-	}
-
-	registerService(port, handler) {
-		this.services.set(port, handler);
-		return () => this.services.delete(port);
-	}
-
-	on(eventName, listener) {
-		if (eventName !== 'session') throw new Error(`unsupported event ${eventName}`);
-		this.sessionListeners.add(listener);
-		return () => this.sessionListeners.delete(listener);
-	}
-
-	receive(context) {
-		return this.services.get(context.dstPort)(context);
-	}
-
-	async sendDatagram(datagram) {
-		this.activeSends += 1;
-		this.maxConcurrentSends = Math.max(this.maxConcurrentSends, this.activeSends);
-		if (this.sendDelayMs) await new Promise((resolve) => setTimeout(resolve, this.sendDelayMs));
-		this.sent.push(datagram);
-		this.activeSends -= 1;
-	}
-
-}
-
-class MemoryRelayClient {
-	requests = [];
-	published = [];
-	closed = false;
-
-	constructor(url, { rejectPublish = false } = {}) {
-		this.url = url;
-		this.rejectPublish = rejectPublish;
-	}
-
-	async subscribe(filter, handlers) {
-		const record = { filter, handlers, closed: false };
-		this.requests.push(record);
-		return () => {
-			record.closed = true;
-		};
-	}
-
-	async publish(publishedEvent) {
-		this.published.push(publishedEvent);
-		if (this.rejectPublish) throw new Error('relay down');
-	}
-
-	close() {
-		this.closed = true;
-	}
-}
-
-class MemoryTransportHub {
-	peers = new Map();
-}
-
-class MemoryTransport {
-	type = 'memory';
-	mtu = 65_535;
-	context;
-	localAddress;
-
-	constructor(hub) {
-		this.hub = hub;
-	}
-
-	async start(context) {
-		this.context = context;
-		this.localAddress = toHex(context.localIdentity.publicKey);
-		this.hub.peers.set(this.localAddress, this);
-	}
-
-	async stop() {
-		this.hub.peers.delete(this.localAddress);
-		this.context = undefined;
-	}
-
-	async connect(address) {
-		const remote = this.hub.peers.get(address.addr);
-		if (!remote) throw new Error(`missing in-memory FIPS peer ${address.addr}`);
-		this.context?.onConnectionState?.({ remoteAddr: address, state: 'connected' });
-		remote.context?.onConnectionState?.({
-			remoteAddr: { transport: this.type, addr: this.localAddress },
-			state: 'connected',
-		});
-	}
-
-	async send(address, packet) {
-		const remote = this.hub.peers.get(address.addr);
-		if (!remote?.context) throw new Error(`offline in-memory FIPS peer ${address.addr}`);
-		const source = { transport: this.type, addr: this.localAddress };
-		queueMicrotask(() => remote.context?.onPacket({
-			transportType: this.type,
-			remoteAddr: source,
-			data: new Uint8Array(packet),
-			receivedAtMs: Date.now(),
-		}));
-	}
-}
-
-function fipsContext(payload, replies) {
-	return {
-		src: peerId,
-		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-		payload,
-		async reply(frame) {
-			replies.push(frame);
-		},
-	};
-}
-
-function routedApproval(subscriptionId) {
-	const payload = new FipsPubsubWireAdapter().encodeOutbound({
-		type: 'event',
-		subscriptionId,
-		event,
-	});
-	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
-	routedPayload.set(routeMagic);
-	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
-	routedPayload.set(payload, routeMagic.length + 32);
-	return { payload, routedPayload };
-}
+import {
+	ackMagic,
+	event,
+	fipsContext,
+	MemoryFipsNode,
+	MemoryRelayClient,
+	MemoryTransport,
+	MemoryTransportHub,
+	peerId,
+	routedApproval,
+} from './webvm-nostr-pubsub-fixtures.js';
 
 test('WebVM bridges only configured relays through the generic FIPS service', async () => {
 	const node = new MemoryFipsNode();
@@ -348,6 +210,39 @@ test('WebVM keeps retrying every frame of a multi-event approval', async () => {
 	const guestFrames = node.sent.filter(({ dst }) => dst === localGuest);
 	expect(guestFrames.length).toBeGreaterThanOrEqual(4);
 	expect(new Set(guestFrames.map(({ payload }) => [...payload].join(','))).size).toBe(2);
+	await bridge.stop();
+});
+
+test('WebVM treats repeated upstream approval frames as retransmissions', async () => {
+	const node = new MemoryFipsNode();
+	const localGuest = `02${'3'.repeat(64)}`;
+	const upstreamAdmin = `02${'4'.repeat(64)}`;
+	const bridge = createWebvmNostrPubsubService({
+		node,
+		relayClients: [new MemoryRelayClient('wss://relay.example')],
+		authorizePeer: (peer) => peer === localGuest,
+		localPeers: () => [localGuest],
+		directApprovalRetryMs: 60_000,
+	});
+	const { routedPayload } = routedApproval('nvpn-join-repeated-upstream');
+
+	await node.receive({
+		src: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedPayload,
+	});
+	await node.receive({
+		src: upstreamAdmin,
+		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
+		payload: routedPayload,
+	});
+
+	expect(bridge.stats.directApprovalForwards).toBe(1);
+	expect(bridge.stats.directApprovalReplays).toBe(1);
+	expect(node.sent).toHaveLength(2);
+	expect(node.sent.every(({ dst }) => dst === localGuest)).toBe(true);
 	await bridge.stop();
 });
 

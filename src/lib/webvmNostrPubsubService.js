@@ -242,8 +242,9 @@ export function createWebvmNostrPubsubService({
 		pending.upstreamPeers.add(upstreamPeer);
 		pending.downstreamPeer = downstreamPeer;
 		pending.expiresAt = now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS;
-		if (!pending.frames.some((frame) => frame.length === approval.frame.length
-			&& frame.every((byte, index) => byte === approval.frame[index]))) {
+		const isNew = !pending.frames.some((frame) => frame.length === approval.frame.length
+			&& frame.every((byte, index) => byte === approval.frame[index]));
+		if (isNew) {
 			pending.frames.push(approval.frame.slice());
 			if (pending.frames.length > MAX_PENDING_DIRECT_APPROVAL_FRAMES) {
 				pending.frames.shift();
@@ -252,7 +253,7 @@ export function createWebvmNostrPubsubService({
 		while (pendingDirectApprovals.size > MAX_PENDING_DIRECT_APPROVAL_RECIPIENTS) {
 			forgetDirectApproval(pendingDirectApprovals.keys().next().value);
 		}
-		return pending;
+		return { pending, isNew };
 	};
 	const replayDirectApproval = async (peer) => {
 		const recipient = xOnlyPeerIdentity(peer);
@@ -358,7 +359,7 @@ export function createWebvmNostrPubsubService({
 						(peer) => xOnlyPeerIdentity(peer) === approval.recipient,
 					);
 					if (!dst) throw new Error('WebVM local FIPS approval recipient is unavailable');
-					const pending = rememberDirectApproval(approval, context.src, dst);
+					const { pending, isNew } = rememberDirectApproval(approval, context.src, dst);
 					if (pending.ack) {
 						await sendDirectApprovalDatagram({
 							dst: context.src,
@@ -367,6 +368,12 @@ export function createWebvmNostrPubsubService({
 							payload: pending.ack.slice(),
 						});
 						stats.directApprovalAckReplays += 1;
+						return;
+					}
+					if (!isNew) {
+						await replayDirectApproval(dst);
+						onDirectApprovalPeer(context.src);
+						scheduleDirectApprovalReplay(approval.recipient);
 						return;
 					}
 					await sendDirectApprovalDatagram({
