@@ -1,9 +1,6 @@
 import { toHex } from '@fips/core';
 import { finalizeEvent } from 'nostr-tools/pure';
-import {
-	FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-	FipsPubsubWireAdapter,
-} from 'nostr-pubsub';
+import { FIPS_NOSTR_PUBSUB_SERVICE_PORT } from 'nostr-pubsub';
 
 const secretKey = new Uint8Array(32).fill(7);
 export const event = finalizeEvent({
@@ -13,8 +10,6 @@ export const event = finalizeEvent({
 	content: 'opaque encrypted application payload',
 }, secretKey);
 export const peerId = `02${event.pubkey}`;
-const routeMagic = new TextEncoder().encode('NVPNFWD1');
-export const ackMagic = new TextEncoder().encode('NVPNACK1');
 
 export class MemoryFipsNode {
 	services = new Map();
@@ -137,17 +132,4 @@ export function fipsContext(payload, replies) {
 			replies.push(frame);
 		},
 	};
-}
-
-export function routedApproval(subscriptionId) {
-	const payload = new FipsPubsubWireAdapter().encodeOutbound({
-		type: 'event',
-		subscriptionId,
-		event,
-	});
-	const routedPayload = new Uint8Array(routeMagic.length + 32 + payload.length);
-	routedPayload.set(routeMagic);
-	routedPayload.set(Uint8Array.from({ length: 32 }, () => 0x33), routeMagic.length);
-	routedPayload.set(payload, routeMagic.length + 32);
-	return { payload, routedPayload };
 }

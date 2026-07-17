@@ -1,50 +1,14 @@
-import { FipsNostrRelayService, FipsPubsubWireCodec } from 'nostr-pubsub';
+import { FipsTcpEndpoint, MarkerStatus, State } from '@fips/tcp';
+import { FipsNostrRelayService } from 'nostr-pubsub';
 
-const DIRECT_JOIN_APPROVAL_PORT = 7368;
-const DIRECT_JOIN_APPROVAL_ROUTE_MAGIC = new TextEncoder().encode('NVPNFWD1');
-const DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION = new TextEncoder().encode('NVPNPAIR1');
-const DIRECT_JOIN_APPROVAL_ACK_MAGIC = new TextEncoder().encode('NVPNACK1');
+const NOSTR_PUBSUB_PORT = 7368;
+export const NVPN_STATE_CONTROL_PORT = 7370;
 const MESH_INGRESS_HINT_MAGIC = new TextEncoder().encode('NVPNMESH1');
-const DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES = DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.length + 32;
-const DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS = 24 * 60 * 60 * 1_000;
-const MAX_PENDING_DIRECT_APPROVAL_FRAMES = 4;
-const MAX_PENDING_DIRECT_APPROVAL_RECIPIENTS = 32;
-const directApprovalCodec = new FipsPubsubWireCodec();
-
-function decodeRoutedJoinApproval(payload) {
-	try {
-		if (!(payload instanceof Uint8Array)
-			|| payload.length <= DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES
-			|| !DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.every((byte, index) => payload[index] === byte)) {
-			return null;
-		}
-		const recipient = payload.slice(
-			DIRECT_JOIN_APPROVAL_ROUTE_MAGIC.length,
-			DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES,
-		);
-		const frame = payload.slice(DIRECT_JOIN_APPROVAL_ROUTE_HEADER_BYTES);
-		const message = directApprovalCodec.decodeFrame(frame);
-		if (message.type !== 'event' || !message.subscriptionId?.startsWith('nvpn-join-')) return null;
-		return {
-			recipient: [...recipient].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
-			frame,
-		};
-	} catch {
-		return null;
-	}
-}
-
-function isApprovalRouteRegistration(payload) {
-	return payload instanceof Uint8Array
-		&& payload.length === DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION.length
-		&& DIRECT_JOIN_APPROVAL_ROUTE_REGISTRATION.every((byte, index) => payload[index] === byte);
-}
-
-function isApprovalAppliedAck(payload) {
-	return payload instanceof Uint8Array
-		&& payload.length > DIRECT_JOIN_APPROVAL_ACK_MAGIC.length
-		&& DIRECT_JOIN_APPROVAL_ACK_MAGIC.every((byte, index) => payload[index] === byte);
-}
+const STATE_CONTROL_READY_MAGIC = new TextEncoder().encode('NVPNCTRL1');
+const STATE_CONTROL_MAX_RECORD_BYTES = 128 * 1024;
+const STATE_CONTROL_IO_BYTES = 16 * 1024;
+const STATE_CONTROL_DRIVE_MS = 20;
+const STATE_CONTROL_TIMEOUT_MS = 15_000;
 
 export function decodeMeshIngressHint(payload) {
 	if (!(payload instanceof Uint8Array)
@@ -57,9 +21,26 @@ export function decodeMeshIngressHint(payload) {
 		.join('');
 }
 
-function xOnlyPeerIdentity(peer) {
+function normalizeCarrierPeer(peer) {
 	const identity = String(peer || '').toLowerCase();
-	return /^(?:02|03)[0-9a-f]{64}$/.test(identity) ? identity.slice(2) : null;
+	return /^(?:02|03)[0-9a-f]{64}$/.test(identity) ? identity : null;
+}
+
+function uniqueCarrierPeers(peers) {
+	const byXOnlyIdentity = new Map();
+	for (const peer of peers) {
+		const identity = normalizeCarrierPeer(peer);
+		if (identity && !byXOnlyIdentity.has(identity.slice(2))) {
+			byXOnlyIdentity.set(identity.slice(2), identity);
+		}
+	}
+	return [...byXOnlyIdentity.values()];
+}
+
+function isStateControlReady(payload) {
+	return payload instanceof Uint8Array
+		&& payload.length === STATE_CONTROL_READY_MAGIC.length
+		&& STATE_CONTROL_READY_MAGIC.every((byte, index) => payload[index] === byte);
 }
 
 function validateRelayClients(relayClients) {
@@ -158,15 +139,119 @@ function safeServiceErrorMessage(error) {
 		.slice(0, 240);
 }
 
+function sleep(milliseconds) {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function joinChunks(chunks, length) {
+	const joined = new Uint8Array(length);
+	let offset = 0;
+	for (const chunk of chunks) {
+		joined.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return joined;
+}
+
+async function readStateControlRecord(tcp, id, isStopped) {
+	const deadline = Date.now() + STATE_CONTROL_TIMEOUT_MS;
+	const chunks = [];
+	let length = 0;
+	while (!isStopped()) {
+		if (Date.now() >= deadline) throw new Error('FIPS-TCP state-control receive timed out');
+		await tcp.poll();
+		const state = await tcp.state(id);
+		if (state === undefined) throw new Error('FIPS-TCP state-control source closed early');
+		if (state === State.Established || state === State.CloseWait) {
+			const bytes = await tcp.read(
+				id,
+				Math.min(STATE_CONTROL_IO_BYTES, STATE_CONTROL_MAX_RECORD_BYTES - length),
+			);
+			if (bytes.length > 0) {
+				chunks.push(bytes);
+				length += bytes.length;
+				continue;
+			}
+			if (await tcp.isReadClosed(id)) {
+				await tcp.close(id);
+				return joinChunks(chunks, length);
+			}
+			if (length === STATE_CONTROL_MAX_RECORD_BYTES) {
+				throw new Error('FIPS-TCP state-control record exceeds 128 KiB');
+			}
+		}
+		await sleep(STATE_CONTROL_DRIVE_MS);
+	}
+	throw new Error('WebVM state-control proxy stopped');
+}
+
+async function waitForLocalControlPeer(localPeers, preferredPeer, isStopped) {
+	const deadline = Date.now() + STATE_CONTROL_TIMEOUT_MS;
+	while (!isStopped() && Date.now() < deadline) {
+		const peers = uniqueCarrierPeers(localPeers());
+		const preferred = normalizeCarrierPeer(preferredPeer());
+		const selected = preferred && peers.find(
+			(peer) => peer.slice(2) === preferred.slice(2),
+		);
+		if (selected) return selected;
+		if (peers.length === 1) return peers[0];
+		if (peers.length > 1) {
+			throw new Error('WebVM state-control proxy requires exactly one local Ethernet guest');
+		}
+		await sleep(STATE_CONTROL_DRIVE_MS);
+	}
+	throw new Error('WebVM local Ethernet guest is unavailable');
+}
+
+async function writeStateControlRecord(tcp, peer, record, isStopped) {
+	const deadline = Date.now() + STATE_CONTROL_TIMEOUT_MS;
+	const id = await tcp.connect(peer);
+	let offset = 0;
+	let finalMarker;
+	try {
+		while (!isStopped() && Date.now() < deadline) {
+			await tcp.poll();
+			const state = await tcp.state(id);
+			if (state === undefined) throw new Error('FIPS-TCP state-control destination closed early');
+			if ((state === State.Established || state === State.CloseWait) && offset < record.length) {
+				const end = Math.min(offset + STATE_CONTROL_IO_BYTES, record.length);
+				const { accepted, marker } = await tcp.writeWithMarker(id, record.subarray(offset, end));
+				offset += accepted;
+				if (accepted > 0 && offset === record.length) finalMarker = marker;
+			}
+			if (finalMarker) {
+				const status = await tcp.markerStatus(finalMarker);
+				if (status === MarkerStatus.ConnectionGone) {
+					throw new Error('FIPS-TCP state-control destination closed before acknowledgment');
+				}
+				if (status === MarkerStatus.Acked) {
+					await tcp.close(id);
+					return;
+				}
+			}
+			await sleep(STATE_CONTROL_DRIVE_MS);
+		}
+		throw new Error('FIPS-TCP state-control forward timed out');
+	} catch (error) {
+		await tcp.abort(id).catch(() => {});
+		throw error;
+	}
+}
+
+function randomIsnSeed() {
+	const seed = new Uint32Array(1);
+	globalThis.crypto.getRandomValues(seed);
+	return seed[0];
+}
+
 export function createWebvmNostrPubsubService({
 	node,
 	relayClients,
 	limits,
 	authorizePeer = () => true,
 	localPeers = () => [],
-	onDirectApprovalPeer = () => {},
+	onStateControlPeer = () => {},
 	onMeshIngressHint = () => {},
-	directApprovalRetryMs = 500,
 	logger = console,
 } = {}) {
 	if (!node || typeof node.registerService !== 'function') {
@@ -178,19 +263,15 @@ export function createWebvmNostrPubsubService({
 	if (typeof localPeers !== 'function') {
 		throw new TypeError('WebVM local FIPS peers must be provided by a function');
 	}
-	if (typeof onDirectApprovalPeer !== 'function') {
-		throw new TypeError('WebVM direct approval peer observer must be a function');
+	if (typeof onStateControlPeer !== 'function') {
+		throw new TypeError('WebVM state-control peer observer must be a function');
 	}
 	if (typeof onMeshIngressHint !== 'function') {
 		throw new TypeError('WebVM mesh ingress hint observer must be a function');
 	}
-	if (!Number.isSafeInteger(directApprovalRetryMs) || directApprovalRetryMs <= 0) {
-		throw new TypeError('WebVM direct approval retry interval must be a positive integer');
-	}
 	const relayUrls = validateRelayClients(relayClients);
-	const pendingDirectApprovals = new Map();
-	let directApprovalSendTail = Promise.resolve();
 	let stopped = false;
+	let stateControlLocalPeer = null;
 	const stats = {
 		subscriptionBatches: 0,
 		relaySubscriptions: 0,
@@ -202,127 +283,27 @@ export function createWebvmNostrPubsubService({
 		lastServiceError: '',
 		lastServiceErrorMessage: '',
 		unauthorizedPeers: 0,
-		directApprovalForwards: 0,
-		directApprovalReplays: 0,
-		directApprovalAcks: 0,
-		directApprovalAckReplays: 0,
-		directRouteRegistrations: 0,
+		stateControlForwards: 0,
+		stateControlFailures: 0,
+		stateControlReadyHints: 0,
+		lastStateControlPeer: '',
 		meshIngressHints: 0,
-		lastDirectRoutePeer: '',
 		recentSubscriptionFilters: [],
 		recentRelayEvents: [],
-	};
-	const forgetDirectApproval = (recipient) => {
-		const pending = pendingDirectApprovals.get(recipient);
-		if (pending?.retryTimer) clearTimeout(pending.retryTimer);
-		pendingDirectApprovals.delete(recipient);
-	};
-	const sendDirectApprovalDatagram = (datagram) => {
-		const sent = directApprovalSendTail.then(() => node.sendDatagram(datagram));
-		directApprovalSendTail = sent.catch(() => {});
-		return sent;
-	};
-	const rememberDirectApproval = (approval, upstreamPeer, downstreamPeer) => {
-		const now = Date.now();
-		for (const [recipient, pending] of pendingDirectApprovals) {
-			if (pending.expiresAt <= now) forgetDirectApproval(recipient);
-		}
-		let pending = pendingDirectApprovals.get(approval.recipient);
-		if (!pending) {
-			pending = {
-				frames: [],
-				upstreamPeers: new Set(),
-				ack: null,
-				downstreamPeer,
-				retryTimer: null,
-				expiresAt: now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS,
-			};
-			pendingDirectApprovals.set(approval.recipient, pending);
-		}
-		pending.upstreamPeers.add(upstreamPeer);
-		pending.downstreamPeer = downstreamPeer;
-		pending.expiresAt = now + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS;
-		const isNew = !pending.frames.some((frame) => frame.length === approval.frame.length
-			&& frame.every((byte, index) => byte === approval.frame[index]));
-		if (isNew) {
-			pending.frames.push(approval.frame.slice());
-			if (pending.frames.length > MAX_PENDING_DIRECT_APPROVAL_FRAMES) {
-				pending.frames.shift();
-			}
-		}
-		while (pendingDirectApprovals.size > MAX_PENDING_DIRECT_APPROVAL_RECIPIENTS) {
-			forgetDirectApproval(pendingDirectApprovals.keys().next().value);
-		}
-		return { pending, isNew };
-	};
-	const replayDirectApproval = async (peer) => {
-		const recipient = xOnlyPeerIdentity(peer);
-		if (!recipient) return;
-		const pending = pendingDirectApprovals.get(recipient);
-		if (!pending) return;
-		if (pending.expiresAt <= Date.now()) {
-			forgetDirectApproval(recipient);
-			return;
-		}
-		if (pending.ack) return;
-		for (const frame of pending.frames) {
-			await sendDirectApprovalDatagram({
-				dst: peer,
-				srcPort: DIRECT_JOIN_APPROVAL_PORT,
-				dstPort: DIRECT_JOIN_APPROVAL_PORT,
-				payload: frame,
-			});
-			stats.directApprovalReplays += 1;
-		}
-	};
-	const scheduleDirectApprovalReplay = (recipient) => {
-		const pending = pendingDirectApprovals.get(recipient);
-		if (stopped || !pending || pending.ack || pending.retryTimer) return;
-		pending.retryTimer = setTimeout(async () => {
-			pending.retryTimer = null;
-			if (stopped || pendingDirectApprovals.get(recipient) !== pending || pending.ack) return;
-			try {
-				await replayDirectApproval(pending.downstreamPeer);
-			} catch (error) {
-				stats.serviceErrors += 1;
-				stats.serviceErrorOperations['direct-approval-replay'] =
-					(stats.serviceErrorOperations['direct-approval-replay'] || 0) + 1;
-				stats.lastServiceError = classifyServiceError(error);
-				stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
-				logger.warn?.('WebVM direct approval replay failed', error);
-			}
-			scheduleDirectApprovalReplay(recipient);
-		}, directApprovalRetryMs);
-	};
-	const forwardApprovalAck = async (peer, payload) => {
-		const recipient = xOnlyPeerIdentity(peer);
-		if (!recipient) return false;
-		const pending = pendingDirectApprovals.get(recipient);
-		if (!pending || pending.expiresAt <= Date.now()) {
-			forgetDirectApproval(recipient);
-			return false;
-		}
-		pending.ack = payload.slice();
-		if (pending.retryTimer) clearTimeout(pending.retryTimer);
-		pending.retryTimer = null;
-		pending.expiresAt = Date.now() + DIRECT_JOIN_APPROVAL_REPLAY_TTL_MS;
-		for (const upstreamPeer of pending.upstreamPeers) {
-			await sendDirectApprovalDatagram({
-				dst: upstreamPeer,
-				srcPort: DIRECT_JOIN_APPROVAL_PORT,
-				dstPort: DIRECT_JOIN_APPROVAL_PORT,
-				payload: pending.ack.slice(),
-			});
-			stats.directApprovalAcks += 1;
-		}
-		return true;
 	};
 	const authorizedNode = {
 		registerService(port, handler) {
 			return node.registerService(port, async (context) => {
-				if (authorizePeer(String(context?.src || '').toLowerCase())) {
-					const meshIngress = port === DIRECT_JOIN_APPROVAL_PORT
+				const source = String(context?.src || '').toLowerCase();
+				if (authorizePeer(source)) {
+					if (port === NOSTR_PUBSUB_PORT
 						&& context?.dstPort === port
+						&& isStateControlReady(context.payload)) {
+						stateControlLocalPeer = normalizeCarrierPeer(source);
+						stats.stateControlReadyHints += 1;
+						return;
+					}
+					const meshIngress = port === NOSTR_PUBSUB_PORT && context?.dstPort === port
 						? decodeMeshIngressHint(context.payload)
 						: null;
 					if (meshIngress) {
@@ -330,62 +311,7 @@ export function createWebvmNostrPubsubService({
 						onMeshIngressHint(meshIngress);
 						return;
 					}
-					if (port === DIRECT_JOIN_APPROVAL_PORT
-						&& context?.dstPort === port
-						&& isApprovalAppliedAck(context.payload)
-						&& await forwardApprovalAck(context.src, context.payload)) {
-						return;
-					}
-					if (port === DIRECT_JOIN_APPROVAL_PORT
-						&& context?.dstPort === port
-						&& isApprovalRouteRegistration(context.payload)) {
-						stats.directRouteRegistrations += 1;
-						stats.lastDirectRoutePeer = String(context.src || '').toLowerCase();
-						const recipient = xOnlyPeerIdentity(context.src);
-						const pending = recipient && pendingDirectApprovals.get(recipient);
-						if (pending) {
-							pending.downstreamPeer = context.src;
-							scheduleDirectApprovalReplay(recipient);
-						}
-						return;
-					}
 					return handler(context);
-				}
-				const approval = port === DIRECT_JOIN_APPROVAL_PORT && context?.dstPort === port
-					? decodeRoutedJoinApproval(context.payload)
-					: null;
-				if (approval) {
-					const dst = [...new Set(localPeers())].find(
-						(peer) => xOnlyPeerIdentity(peer) === approval.recipient,
-					);
-					if (!dst) throw new Error('WebVM local FIPS approval recipient is unavailable');
-					const { pending, isNew } = rememberDirectApproval(approval, context.src, dst);
-					if (pending.ack) {
-						await sendDirectApprovalDatagram({
-							dst: context.src,
-							srcPort: port,
-							dstPort: port,
-							payload: pending.ack.slice(),
-						});
-						stats.directApprovalAckReplays += 1;
-						return;
-					}
-					if (!isNew) {
-						await replayDirectApproval(dst);
-						onDirectApprovalPeer(context.src);
-						scheduleDirectApprovalReplay(approval.recipient);
-						return;
-					}
-					await sendDirectApprovalDatagram({
-						dst,
-						srcPort: port,
-						dstPort: port,
-						payload: approval.frame,
-					});
-					onDirectApprovalPeer(context.src);
-					stats.directApprovalForwards += 1;
-					scheduleDirectApprovalReplay(approval.recipient);
-					return;
 				}
 				stats.unauthorizedPeers += 1;
 				throw new Error('WebVM Nostr pubsub is restricted to local Ethernet guests');
@@ -409,7 +335,52 @@ export function createWebvmNostrPubsubService({
 			logger.warn?.('WebVM Nostr pubsub relay error', context, error);
 		},
 	});
+	const stateControl = new FipsTcpEndpoint(node, NVPN_STATE_CONTROL_PORT, {
+		receiveBuffer: 0xffff,
+		sendBuffer: 0xffff,
+		maxConnections: 64,
+		maxConnectionsPerPeer: 8,
+	}, randomIsnSeed());
 	service.start();
+
+	const proxyTask = (async () => {
+		while (!stopped) {
+			try {
+				await stateControl.poll();
+				const upstream = await stateControl.accept();
+				if (upstream === undefined) {
+					await sleep(STATE_CONTROL_DRIVE_MS);
+					continue;
+				}
+				try {
+					const upstreamPeer = await stateControl.peer(upstream);
+					if (!normalizeCarrierPeer(upstreamPeer)) {
+						throw new Error('WebVM state-control source has an invalid FIPS identity');
+					}
+					const record = await readStateControlRecord(stateControl, upstream, () => stopped);
+					const downstreamPeer = await waitForLocalControlPeer(
+						localPeers,
+						() => stateControlLocalPeer,
+						() => stopped,
+					);
+					onStateControlPeer(upstreamPeer);
+					await writeStateControlRecord(stateControl, downstreamPeer, record, () => stopped);
+					stats.stateControlForwards += 1;
+					stats.lastStateControlPeer = upstreamPeer;
+				} catch (error) {
+					await stateControl.abort(upstream).catch(() => {});
+					throw error;
+				}
+			} catch (error) {
+				if (stopped) break;
+				stats.stateControlFailures += 1;
+				stats.lastServiceError = classifyServiceError(error);
+				stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
+				logger.warn?.('WebVM FIPS-TCP state-control proxy error', error);
+				await sleep(STATE_CONTROL_DRIVE_MS);
+			}
+		}
+	})();
 
 	return {
 		service,
@@ -418,8 +389,8 @@ export function createWebvmNostrPubsubService({
 		async stop() {
 			if (stopped) return;
 			stopped = true;
-			for (const recipient of pendingDirectApprovals.keys()) forgetDirectApproval(recipient);
-			pendingDirectApprovals.clear();
+			await proxyTask;
+			await stateControl.dispose();
 			await service.stop();
 		},
 	};

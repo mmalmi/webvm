@@ -8,7 +8,6 @@ const PORTABLE_FILE_PATHS = [
 	'/var/lib/nvpn/.config.toml.pending-join-request.secret',
 	'/var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret',
 	'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret',
-	'/var/lib/nvpn/config.toml.join-approval-ack',
 ];
 const RECORD_KEY = 'root-filesystem';
 const SAVE_DELAY_MS = 1_000;

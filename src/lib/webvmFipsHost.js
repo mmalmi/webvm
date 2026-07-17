@@ -115,7 +115,7 @@ export async function createWebvmFipsHost({
 		relayClients: sharedRelayClients,
 		authorizePeer: (peer) => localEthernetPeers.has(peer),
 		localPeers: () => [...localEthernetPeers],
-		onDirectApprovalPeer: rememberWebvmFipsIngress,
+		onStateControlPeer: rememberWebvmFipsIngress,
 		onMeshIngressHint: connectHintedIngress,
 		logger,
 	});

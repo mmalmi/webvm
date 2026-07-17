@@ -43,7 +43,7 @@ function startAdminHelper({ configPath, manifest }) {
 			...process.env,
 			NVPN_WEBVM_REAL_E2E: '1',
 			RUSTC_WRAPPER: '',
-			RUST_LOG: 'off',
+			RUST_LOG: process.env.NVPN_WEBVM_ADMIN_RUST_LOG || 'off',
 		},
 		stdio: ['pipe', 'pipe', 'pipe'],
 	});
@@ -223,7 +223,7 @@ async function startAndScanJoinRequest(page) {
 	};
 }
 
-test('admin approval reaches WebVM directly over FIPS without relay traffic', async ({ page }) => {
+test('admin approval reaches WebVM over FIPS without application relay traffic', async ({ page }) => {
 	test.setTimeout(420_000);
 	const fixture = inspectNativeFixture();
 	console.log(
@@ -281,11 +281,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activeSubscriptionCount?.(),
 					pendingReplies:
 						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
-					directApprovalForwards: stats.directApprovalForwards,
-					directApprovalReplays: stats.directApprovalReplays,
-					directApprovalAcks: stats.directApprovalAcks,
-					directApprovalAckReplays: stats.directApprovalAckReplays,
-					directRouteRegistrations: stats.directRouteRegistrations,
+					stateControlForwards: stats.stateControlForwards,
+					stateControlFailures: stats.stateControlFailures,
+					stateControlReadyHints: stats.stateControlReadyHints,
 					subscriptionBatches: stats.subscriptionBatches,
 					relayEvents: stats.relayEvents,
 					relaySubscriptions: stats.relaySubscriptions,
@@ -303,8 +301,9 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		};
 		const beforeApproval = await captureDeliveryState();
 		expect(beforeApproval.approvalSeen).toBe(false);
-		expect(beforeApproval.directRouteRegistrations ?? 0).toBeGreaterThanOrEqual(1);
-		expect(beforeApproval.directApprovalForwards ?? 0).toBe(0);
+		expect(beforeApproval.stateControlForwards ?? 0).toBe(0);
+		expect(beforeApproval.stateControlFailures ?? 0).toBe(0);
+		expect(beforeApproval.stateControlReadyHints ?? 0).toBeGreaterThanOrEqual(1);
 		expect(beforeApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(beforeApproval.relayEvents ?? 0).toBe(0);
 		expect(beforeApproval.relaySubscriptions ?? 0).toBe(0);
@@ -314,10 +313,21 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		} catch (error) {
 			throw await approvalFailure(error);
 		}
-		const approvalAckLatencyMs = Date.now() - approvalStartedAt;
+		const senderTcpAckLatencyMs = Date.now() - approvalStartedAt;
 		expect(imported.participantAdded).toBe(true);
-		expect(imported.directEvents).toBe(2);
-		expect(approvalAckLatencyMs).toBeLessThanOrEqual(15_000);
+		expect(imported.directRosters).toBe(1);
+		expect(senderTcpAckLatencyMs).toBeLessThanOrEqual(15_000);
+		try {
+			await waitUntil(
+				() => page.evaluate(() => (
+					globalThis.__nvpnJoinE2eSerial?.text || ''
+				).includes('Join approved for network')),
+				{ timeoutMs: 15_000, message: 'WebVM did not apply the signed roster' },
+			);
+		} catch (error) {
+			throw await approvalFailure(error);
+		}
+		const rosterAppliedLatencyMs = Date.now() - approvalStartedAt;
 		await page.evaluate(() => {
 			const serial = globalThis.__nvpnJoinE2eSerial;
 			serial.text = '';
@@ -403,11 +413,12 @@ test('admin approval reaches WebVM directly over FIPS without relay traffic', as
 		expect(restoredMeshLatencyMs).toBeLessThanOrEqual(20_000);
 		const afterReload = await captureDeliveryState();
 		const meshReachabilityLatencyMs = Date.now() - approvalStartedAt;
-		console.log(`native approval ACK reached WebVM in ${approvalAckLatencyMs}ms`);
+		console.log(`admin FIPS-TCP bytes reached the browser in ${senderTcpAckLatencyMs}ms`);
+		console.log(`signed roster was applied by WebVM in ${rosterAppliedLatencyMs}ms`);
 		console.log(`approved peer became reachable via mesh in ${meshReachabilityLatencyMs}ms`);
 		console.log(`restored peer became reachable via mesh in ${restoredMeshLatencyMs}ms`);
-		expect(afterApproval.directApprovalForwards).toBe(imported.directEvents);
-		expect(afterApproval.directApprovalAcks).toBeGreaterThanOrEqual(1);
+		expect(afterApproval.stateControlForwards).toBe(imported.directRosters);
+		expect(afterApproval.stateControlFailures ?? 0).toBe(0);
 		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
 		expect(afterApproval.relayEvents ?? 0).toBe(0);
 		expect(afterApproval.relaySubscriptions ?? 0).toBe(0);

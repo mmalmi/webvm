@@ -39,6 +39,16 @@ const APPROVED_PACKAGES = [
 		sha512: 'ApsAMv4jaHtff8cIcDoRjPF+RpZ6cn2IFPl0iMYvliXJd/5Dtz9umh6uRHSjFvkVlCNUCyEgQ2p5IEOKRd+Mpw==',
 	},
 ];
+const APPROVED_REMOTE_PACKAGES = [
+	{
+		name: '@fips/tcp',
+		version: '0.2.0',
+		asset: 'fips-tcp-0.2.0.tgz',
+		url: 'https://github.com/mmalmi/fips-tcp/releases/download/v0.2.0/fips-tcp-0.2.0.tgz',
+		sha256: '0df4dae9aaa388752636c867b27384881aa62e04fb74e67cb48fae04d35c1d05',
+		sha512: 'KCJmltpx4cH76Sp+GOKJvYzQpwUTUtmyBA5bgcfS36ty8AxSgBQZxLdBwM59IER+B/rZpjRYFtqE6MPePL0o+w==',
+	},
+];
 
 function digests(bytes) {
 	return {
@@ -115,6 +125,45 @@ for (const approved of APPROVED_PACKAGES) {
 		}
 	}
 	console.log(`Verified ${approved.name} ${approved.version} (${actual.sha256}).`);
+}
+
+for (const approved of APPROVED_REMOTE_PACKAGES) {
+	const locked = lock.packages?.[`node_modules/${approved.name}`];
+	const source = new URL(approved.url);
+	if (source.protocol !== 'https:'
+		|| source.hostname !== 'github.com'
+		|| !source.pathname.includes('/releases/download/')
+		|| path.posix.basename(source.pathname) !== approved.asset) {
+		failures.push(`${approved.name} source URL is not an immutable matching release asset`);
+	}
+	if (manifest.dependencies?.[approved.name] !== approved.url) {
+		failures.push(`package.json must pin ${approved.name} to ${approved.url}`);
+	}
+	if (lock.packages?.['']?.dependencies?.[approved.name] !== approved.url) {
+		failures.push(`package-lock.json root must pin ${approved.name} to ${approved.url}`);
+	}
+	if (locked?.version !== approved.version || locked?.resolved !== approved.url) {
+		failures.push(
+			`package-lock.json must resolve ${approved.name} ${approved.version} from its release asset`,
+		);
+	}
+	if (locked?.integrity !== `sha512-${approved.sha512}`) {
+		failures.push(`package-lock.json ${approved.name} integrity does not match the approved archive`);
+	}
+	if (process.env.VERIFY_VENDORED_REMOTE === '1') {
+		const response = await fetch(approved.url, { redirect: 'follow' });
+		if (!response.ok) {
+			failures.push(`${approved.name} source download failed: HTTP ${response.status}`);
+		} else {
+			const remote = digests(new Uint8Array(await response.arrayBuffer()));
+			for (const algorithm of ['sha256', 'sha512']) {
+				if (remote[algorithm] !== approved[algorithm]) {
+					failures.push(`${approved.name} source ${algorithm} does not match the approved archive`);
+				}
+			}
+		}
+	}
+	console.log(`Verified ${approved.name} ${approved.version} (${approved.sha256}).`);
 }
 
 if (failures.length > 0) {
