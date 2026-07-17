@@ -13,6 +13,7 @@ test('deployment always starts from the frozen lockfile', () => {
 
 	assert.match(output, /Install frozen dependencies: npm ci/u);
 	assert.ok(output.indexOf('npm ci') < output.indexOf('npm run test:release'));
+	assert.match(output, /npx wrangler@4\.112\.0 deploy/u);
 });
 
 test('WebVM publishes the Iris Sites WebVM icon from the application shell', () => {

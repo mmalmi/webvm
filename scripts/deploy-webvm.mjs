@@ -10,7 +10,7 @@ const appDir = path.resolve(__dirname, '..');
 const DEFAULT_WORKER_NAME = 'iris-webvm';
 const DEFAULT_DOMAIN = 'webvm.iris.to';
 const DEFAULT_COMPATIBILITY_DATE = '2026-03-19';
-const DEFAULT_WRANGLER_VERSION = '4';
+const DEFAULT_WRANGLER_VERSION = '4.112.0';
 
 function takeFlagValue(args, flag) {
 	const value = args.shift();
