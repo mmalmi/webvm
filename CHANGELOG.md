@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.2 - 2026-07-17
+
+- Proxy nVPN state-control records over the existing authenticated FIPS-TCP
+  service, so WebVM approval applies one signed roster without application
+  relay traffic, a custom receipt, or an application ACK protocol.
+- Vendor immutable `nostr-pubsub` 0.3.1, retaining the unchanged
+  `nostr.pubsub/1` service and 65,525-byte FSP datagram boundary while fixing
+  reconnecting subscription lifecycle.
+- Publish the Iris Sites WebVM favicon.
+
 ## 2.0.1 - 2026-07-16
 
 - Vendor the immutable FIPS TypeScript 0.0.26 core, Ethernet, and WebRTC

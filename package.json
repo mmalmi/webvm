@@ -1,6 +1,6 @@
 {
 	"name": "iris-webvm",
-	"version": "2.0.1",
+	"version": "2.0.2",
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
@@ -44,7 +44,7 @@
 		"@fips/tcp": "https://github.com/mmalmi/fips-tcp/releases/download/v0.2.0/fips-tcp-0.2.0.tgz",
 		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.25.tgz",
 		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.42.tgz",
-		"nostr-pubsub": "file:vendor/nostr-pubsub-0.3.0.tgz",
+		"nostr-pubsub": "file:vendor/nostr-pubsub-0.3.1.tgz",
 		"nostr-tools": "^2.23.9",
 		"v86": "^0.5.424"
 	},
