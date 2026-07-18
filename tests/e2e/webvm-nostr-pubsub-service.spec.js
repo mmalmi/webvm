@@ -39,7 +39,7 @@ async function settle(bridge, ...clients) {
 	}
 }
 
-test('WebVM routes relay history/live events and FIPS publications without echoes', async () => {
+test('WebVM routes relay history and live events plus FIPS publications without echoes', async () => {
 	const network = new MemoryFipsNetwork();
 	const hostNode = network.node(hostPeerId);
 	const guest = new FipsNostrPubsubClient({
@@ -60,20 +60,26 @@ test('WebVM routes relay history/live events and FIPS publications without echoe
 		relayClients,
 		authorizePeer: (peer) => peer === peerId,
 	});
-	const received = [];
-	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
 	await settle(bridge, guest);
 
 	expect(hostNode.services.has(FIPS_NOSTR_PUBSUB_SERVICE_PORT)).toBe(true);
 	await expect.poll(() => relayClients.every((client) => client.requests.length === 1)).toBe(true);
 	expect(relayClients.map((client) => client.requests[0].filter)).toEqual([FILTERS[0], FILTERS[0]]);
 
+	const received = [];
 	relayClients[0].requests[0].handlers.onEvent(event);
-	relayClients[1].requests[0].handlers.onEvent(event);
+	await settle(bridge, guest);
+	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
 	await settle(bridge, guest);
 	expect(received).toEqual([event.id]);
 
-	const published = nextEvent(1_700_000_001, 'from the local guest');
+	const live = nextEvent(1_700_000_001, 'live relay event');
+	relayClients[0].requests[0].handlers.onEvent(live);
+	relayClients[1].requests[0].handlers.onEvent(live);
+	await settle(bridge, guest);
+	expect(received).toEqual([event.id, live.id]);
+
+	const published = nextEvent(1_700_000_002, 'from the local guest');
 	await guest.publish(published);
 	await settle(bridge, guest);
 	expect(relayClients.map((client) => client.published)).toEqual([[published], [published]]);
