@@ -29,6 +29,11 @@ export {
 	WEBVM_FIPS_UNDERLAY_MTU,
 } from '$lib/webvmFipsConfig.js';
 
+export const WEBVM_NOSTR_PUBSUB_FILTERS = Object.freeze([
+	Object.freeze({ kinds: Object.freeze([37_195, 37_196, 7_368]) }),
+	Object.freeze({ kinds: Object.freeze([30_064, 30_078]) }),
+]);
+
 function macForIdentity(identity) {
 	const mac = new Uint8Array(6);
 	mac[0] = 0x02;
@@ -106,8 +111,11 @@ export async function createWebvmFipsHost({
 		logger,
 	});
 	const localEthernetPeers = new Set();
-	const pubsub = createWebvmNostrPubsubService({
+	const pubsub = await createWebvmNostrPubsubService({
 		node,
+		localPeerId: toHex(identity.publicKey),
+		peers: () => [...localEthernetPeers],
+		filters: WEBVM_NOSTR_PUBSUB_FILTERS,
 		relayClients: sharedRelayClients,
 		authorizePeer: (peer) => localEthernetPeers.has(peer),
 		logger,
@@ -143,6 +151,7 @@ export async function createWebvmFipsHost({
 			} else {
 				localEthernetPeers.delete(peer);
 			}
+			pubsub.refreshPeers();
 		}
 		if (event?.remoteAddr?.transport === 'webrtc') {
 			if (connected) {

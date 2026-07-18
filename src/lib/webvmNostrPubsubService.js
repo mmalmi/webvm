@@ -1,4 +1,18 @@
-import { FipsNostrRelayService } from 'nostr-pubsub';
+import {
+	FipsNostrPubsubClient,
+	FipsNostrPubsubEventSource,
+	NostrPubsubRouter,
+	NostrRelayEventSource,
+	allowWithPriority,
+	fipsPeerDefaultRoute,
+	relayRoute,
+} from 'nostr-pubsub';
+
+const COMPRESSED_FIPS_KEY = /^(?:02|03)[0-9a-f]{64}$/u;
+const allowBridgeRoutes = {
+	checkEvent: () => allowWithPriority(0),
+	checkSource: () => allowWithPriority(0),
+};
 
 function validateRelayClients(relayClients) {
 	if (!Array.isArray(relayClients) || relayClients.length === 0) {
@@ -22,6 +36,25 @@ function validateRelayClients(relayClients) {
 		urls.push(url.href);
 	}
 	return Object.freeze(urls);
+}
+
+function validateFilters(filters) {
+	if (!Array.isArray(filters) || filters.length === 0) {
+		throw new TypeError('WebVM Nostr pubsub requires explicit bridge filters');
+	}
+	for (const filter of filters) {
+		if (!filter || typeof filter !== 'object' || Array.isArray(filter)) {
+			throw new TypeError('Invalid WebVM Nostr pubsub bridge filter');
+		}
+	}
+	return structuredClone(filters);
+}
+
+function configuredKinds(filters) {
+	if (filters.some((filter) => !Array.isArray(filter.kinds) || filter.kinds.length === 0)) {
+		return undefined;
+	}
+	return [...new Set(filters.flatMap((filter) => filter.kinds))];
 }
 
 function createRelayTransport(relayClients, stats) {
@@ -78,11 +111,10 @@ function createRelayTransport(relayClients, stats) {
 
 function classifyServiceError(error) {
 	const message = error instanceof Error ? error.message : String(error || '');
-	if (message.includes('no route')) return 'no-route';
-	if (message.includes('exceeds MTU') || message.includes('MtuExceeded')) return 'mtu-exceeded';
+	if (message.includes('no route') || message.includes('unroutable')) return 'no-route';
 	if (message.includes('handshake timeout')) return 'handshake-timeout';
 	if (message.includes('before') && message.includes('handshake')) return 'handshake-state';
-	if (message.includes('reply queue')) return 'reply-backpressure';
+	if (message.includes('queue')) return 'backpressure';
 	if (message.includes('decrypt')) return 'decrypt-failed';
 	if (message.includes('signature')) return 'signature-failed';
 	return 'other';
@@ -91,24 +123,39 @@ function classifyServiceError(error) {
 function safeServiceErrorMessage(error) {
 	const message = error instanceof Error ? error.message : String(error || '');
 	return message
-		.replace(/npub1[023456789acdefghjklmnpqrstuvwxyz]+/gi, 'npub1[redacted]')
-		.replace(/\b(?:02|03)?[0-9a-f]{64}\b/gi, '[redacted-key]')
+		.replace(/npub1[023456789acdefghjklmnpqrstuvwxyz]+/giu, 'npub1[redacted]')
+		.replace(/\b(?:02|03)?[0-9a-f]{64}\b/giu, '[redacted-key]')
 		.slice(0, 240);
 }
 
-export function createWebvmNostrPubsubService({
+/**
+ * Routes one explicit Nostr subscription set between traditional relays and
+ * authenticated local FIPS peers. The shared router globally deduplicates
+ * relay/FIPS echoes while the FIPS adapter uses reliable TCP INV/WANT records.
+ */
+export async function createWebvmNostrPubsubService({
 	node,
+	localPeerId,
+	peers,
+	filters,
 	relayClients,
 	limits,
 	authorizePeer = () => true,
 	logger = console,
 } = {}) {
-	if (!node || typeof node.registerService !== 'function') {
+	if (!node || typeof node.registerService !== 'function' || typeof node.sendDatagram !== 'function') {
 		throw new TypeError('WebVM Nostr pubsub service requires a FipsNode');
+	}
+	if (!COMPRESSED_FIPS_KEY.test(String(localPeerId || '').toLowerCase())) {
+		throw new TypeError('WebVM Nostr pubsub requires a compressed local FIPS identity');
+	}
+	if (typeof peers !== 'function') {
+		throw new TypeError('WebVM Nostr pubsub requires an admitted peer source');
 	}
 	if (typeof authorizePeer !== 'function') {
 		throw new TypeError('WebVM Nostr pubsub peer authorization must be a function');
 	}
+	const bridgeFilters = validateFilters(filters);
 	const relayUrls = validateRelayClients(relayClients);
 	const stats = {
 		subscriptionBatches: 0,
@@ -124,6 +171,9 @@ export function createWebvmNostrPubsubService({
 		recentSubscriptionFilters: [],
 		recentRelayEvents: [],
 	};
+	const admittedPeers = () => [...new Set(peers()
+		.map((peer) => String(peer).toLowerCase())
+		.filter((peer) => authorizePeer(peer)))];
 	const authorizedNode = {
 		registerService(port, handler) {
 			return node.registerService(port, (context) => {
@@ -134,35 +184,88 @@ export function createWebvmNostrPubsubService({
 				return handler(context);
 			});
 		},
+		sendDatagram(datagram) {
+			if (!authorizePeer(String(datagram?.dst || '').toLowerCase())) {
+				throw new Error('WebVM Nostr pubsub cannot send to a non-local FIPS peer');
+			}
+			return node.sendDatagram(datagram);
+		},
 		on(event, listener) {
 			return node.on?.(event, listener);
 		},
 	};
-	const service = new FipsNostrRelayService({
+	const reportError = (error, context) => {
+		stats.serviceErrors += 1;
+		const operation = String(context?.operation || 'bridge');
+		stats.serviceErrorOperations[operation] =
+			(stats.serviceErrorOperations[operation] || 0) + 1;
+		stats.lastServiceError = classifyServiceError(error);
+		stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
+		logger.warn?.('WebVM Nostr pubsub router error', context, error);
+	};
+	const client = new FipsNostrPubsubClient({
 		node: authorizedNode,
-		relay: createRelayTransport(relayClients, stats),
+		localPeerId: localPeerId.toLowerCase(),
+		peers: admittedPeers,
+		allowedKinds: configuredKinds(bridgeFilters),
 		limits,
-		onError(error, context) {
-			stats.serviceErrors += 1;
-			const operation = String(context?.operation || 'unknown');
-			stats.serviceErrorOperations[operation] =
-				(stats.serviceErrorOperations[operation] || 0) + 1;
-			stats.lastServiceError = classifyServiceError(error);
-			stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
-			logger.warn?.('WebVM Nostr pubsub relay error', context, error);
-		},
+		onError: reportError,
+	}).start();
+	const fips = new FipsNostrPubsubEventSource(client);
+	const relay = new NostrRelayEventSource(
+		`webvm:${relayUrls.join(',')}`,
+		createRelayTransport(relayClients, stats),
+	);
+	const fipsRoute = fipsPeerDefaultRoute('webvm-local-ethernet');
+	const relayRouteEntry = relayRoute(`webvm:${relayUrls.join(',')}`);
+	const router = new NostrPubsubRouter({
+		policy: allowBridgeRoutes,
+		liveSources: [
+			{ route: fipsRoute, subscriber: fips },
+			{ route: relayRouteEntry, subscriber: relay },
+		],
 	});
-	service.start();
+	const pending = new Set();
+	const forward = (promise, context) => {
+		const tracked = Promise.resolve(promise)
+			.catch((error) => reportError(error, context))
+			.finally(() => pending.delete(tracked));
+		pending.add(tracked);
+	};
+	let subscription;
+	try {
+		subscription = await router.subscribeWithOptions(bridgeFilters, (incoming) => {
+			if (incoming.route.id === relayRouteEntry.id) {
+				forward(fips.publish(incoming.event, incoming.source), { operation: 'relay-to-fips' });
+				return;
+			}
+			forward(relay.publish(incoming.event, incoming.source), { operation: 'fips-to-relay' });
+		});
+	} catch (error) {
+		await client.stop();
+		throw error;
+	}
 
 	let stopped = false;
 	return {
-		service,
+		client,
+		router,
 		stats,
 		relays: relayUrls,
+		refreshPeers() {
+			client.refreshPeers();
+		},
+		async idle() {
+			await client.idle();
+			while (pending.size > 0) await Promise.allSettled([...pending]);
+			await client.idle();
+		},
 		async stop() {
 			if (stopped) return;
 			stopped = true;
-			await service.stop();
+			subscription.close();
+			while (pending.size > 0) await Promise.allSettled([...pending]);
+			await client.stop();
 		},
 	};
 }

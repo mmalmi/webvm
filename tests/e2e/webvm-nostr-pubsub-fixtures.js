@@ -1,6 +1,5 @@
 import { toHex } from '@fips/core';
 import { finalizeEvent } from 'nostr-tools/pure';
-import { FIPS_NOSTR_PUBSUB_SERVICE_PORT } from 'nostr-pubsub';
 
 const secretKey = new Uint8Array(32).fill(7);
 export const event = finalizeEvent({
@@ -10,16 +9,26 @@ export const event = finalizeEvent({
 	content: 'opaque encrypted application payload',
 }, secretKey);
 export const peerId = `02${event.pubkey}`;
+export const hostPeerId = `03${'4'.repeat(64)}`;
+
+export class MemoryFipsNetwork {
+	nodes = new Map();
+
+	node(peer) {
+		const node = new MemoryFipsNode(peer, this);
+		this.nodes.set(peer, node);
+		return node;
+	}
+}
 
 export class MemoryFipsNode {
 	services = new Map();
+	peerListeners = new Set();
 	sessionListeners = new Set();
-	sent = [];
-	activeSends = 0;
-	maxConcurrentSends = 0;
 
-	constructor(sendDelayMs = 0) {
-		this.sendDelayMs = sendDelayMs;
+	constructor(id, network) {
+		this.id = id;
+		this.network = network;
 	}
 
 	registerService(port, handler) {
@@ -28,21 +37,31 @@ export class MemoryFipsNode {
 	}
 
 	on(eventName, listener) {
-		if (eventName !== 'session') throw new Error(`unsupported event ${eventName}`);
-		this.sessionListeners.add(listener);
-		return () => this.sessionListeners.delete(listener);
+		const listeners = eventName === 'peer' ? this.peerListeners : this.sessionListeners;
+		listeners.add(listener);
+		return () => listeners.delete(listener);
 	}
 
-	receive(context) {
-		return this.services.get(context.dstPort)(context);
+	emit(eventName, event) {
+		const listeners = eventName === 'peer' ? this.peerListeners : this.sessionListeners;
+		for (const listener of listeners) listener(event);
 	}
 
 	async sendDatagram(datagram) {
-		this.activeSends += 1;
-		this.maxConcurrentSends = Math.max(this.maxConcurrentSends, this.activeSends);
-		if (this.sendDelayMs) await new Promise((resolve) => setTimeout(resolve, this.sendDelayMs));
-		this.sent.push(datagram);
-		this.activeSends -= 1;
+		const target = this.network.nodes.get(datagram.dst);
+		if (!target) throw new Error(`unroutable FIPS peer ${datagram.dst}`);
+		queueMicrotask(() => void target.receive({
+			src: this.id,
+			srcPort: datagram.srcPort || 0,
+			dstPort: datagram.dstPort,
+			payload: new Uint8Array(datagram.payload),
+		}).catch(() => undefined));
+	}
+
+	async receive(context) {
+		const handler = this.services.get(context.dstPort);
+		if (!handler) throw new Error(`no FIPS service on ${context.dstPort}`);
+		await handler(context);
 	}
 }
 
@@ -120,16 +139,4 @@ export class MemoryTransport {
 			receivedAtMs: Date.now(),
 		}));
 	}
-}
-
-export function fipsContext(payload, replies) {
-	return {
-		src: peerId,
-		srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-		dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-		payload,
-		async reply(frame) {
-			replies.push(frame);
-		},
-	};
 }

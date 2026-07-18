@@ -44,7 +44,7 @@
 		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.26.tgz",
 		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.43.tgz",
 		"@fips/transport-websocket": "file:vendor/fips/fips-transport-websocket-0.0.1.tgz",
-		"nostr-pubsub": "file:vendor/nostr-pubsub-0.3.1.tgz",
+		"nostr-pubsub": "file:vendor/nostr-pubsub-0.5.1.tgz",
 		"nostr-tools": "^2.23.9",
 		"v86": "^0.5.424"
 	},

@@ -6,154 +6,184 @@ import {
 } from '@fips/core';
 import {
 	FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-	FipsPubsubWireAdapter,
+	FipsNostrPubsubClient,
 } from 'nostr-pubsub';
+import { finalizeEvent } from 'nostr-tools/pure';
 import { createWebvmNostrPubsubService } from '../../src/lib/webvmNostrPubsubService.js';
 import {
 	event,
-	fipsContext,
-	MemoryFipsNode,
+	hostPeerId,
+	MemoryFipsNetwork,
 	MemoryRelayClient,
 	MemoryTransport,
 	MemoryTransportHub,
 	peerId,
 } from './webvm-nostr-pubsub-fixtures.js';
 
-test('WebVM bridges only configured relays through the generic FIPS service', async () => {
-	const node = new MemoryFipsNode();
+const FILTERS = [{ kinds: [7368], '#p': ['1'.repeat(64)], limit: 8 }];
+
+function nextEvent(createdAt, content) {
+	return finalizeEvent({
+		kind: 7368,
+		created_at: createdAt,
+		tags: [['p', '1'.repeat(64)]],
+		content,
+	}, new Uint8Array(32).fill(9));
+}
+
+async function settle(bridge, ...clients) {
+	for (let attempt = 0; attempt < 12; attempt += 1) {
+		await bridge.idle();
+		await Promise.all(clients.map((client) => client.idle()));
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+}
+
+test('WebVM routes relay history/live events and FIPS publications without echoes', async () => {
+	const network = new MemoryFipsNetwork();
+	const hostNode = network.node(hostPeerId);
+	const guest = new FipsNostrPubsubClient({
+		node: network.node(peerId),
+		localPeerId: peerId,
+		peers: () => [hostPeerId],
+		allowedKinds: [7368],
+	}).start();
 	const relayClients = [
 		new MemoryRelayClient('wss://relay-one.example', { rejectPublish: true }),
 		new MemoryRelayClient('wss://relay-two.example'),
 	];
-	const adapter = new FipsPubsubWireAdapter();
-	const bridge = createWebvmNostrPubsubService({
-		node,
+	const bridge = await createWebvmNostrPubsubService({
+		node: hostNode,
+		localPeerId: hostPeerId,
+		peers: () => [peerId],
+		filters: FILTERS,
 		relayClients,
 		authorizePeer: (peer) => peer === peerId,
 	});
-	const replies = [];
+	const received = [];
+	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
+	await settle(bridge, guest);
 
-	await node.receive(fipsContext(adapter.encodeOutbound({
-		type: 'req',
-		subscriptionId: 'test-subscription',
-		filters: [{ kinds: [7368], '#p': ['1'.repeat(64)], limit: 100 }],
-	}), replies));
-
-	expect(node.services.has(FIPS_NOSTR_PUBSUB_SERVICE_PORT)).toBe(true);
-	expect([...node.services.keys()]).toEqual([FIPS_NOSTR_PUBSUB_SERVICE_PORT]);
-	expect(Object.keys(bridge.stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
+	expect(hostNode.services.has(FIPS_NOSTR_PUBSUB_SERVICE_PORT)).toBe(true);
 	await expect.poll(() => relayClients.every((client) => client.requests.length === 1)).toBe(true);
-	expect(relayClients.map((client) => client.requests[0].filter)).toEqual([
-		{ kinds: [7368], '#p': ['1'.repeat(64)], limit: 8 },
-		{ kinds: [7368], '#p': ['1'.repeat(64)], limit: 8 },
-	]);
+	expect(relayClients.map((client) => client.requests[0].filter)).toEqual([FILTERS[0], FILTERS[0]]);
 
 	relayClients[0].requests[0].handlers.onEvent(event);
-	await expect.poll(() => replies.length).toBe(1);
-	const reply = adapter.codec.decodeFrame(replies[0]);
-	expect(reply.type).toBe('event');
-	if (reply.type !== 'event') throw new Error('expected EVENT');
-	expect(reply.subscriptionId).toBe('test-subscription');
-	expect(reply.event.id).toBe(event.id);
+	relayClients[1].requests[0].handlers.onEvent(event);
+	await settle(bridge, guest);
+	expect(received).toEqual([event.id]);
 
-	await node.receive(fipsContext(adapter.encodeOutbound({ type: 'event', event }), replies));
-	expect(relayClients.map((client) => client.published)).toEqual([[event], [event]]);
+	const published = nextEvent(1_700_000_001, 'from the local guest');
+	await guest.publish(published);
+	await settle(bridge, guest);
+	expect(relayClients.map((client) => client.published)).toEqual([[published], [published]]);
+	expect(bridge.stats.publishBatches).toBe(1);
 
 	await bridge.stop();
+	await guest.stop();
 	expect(relayClients.every((client) => client.requests[0].closed)).toBe(true);
-	expect(relayClients.every((client) => !client.closed)).toBe(true);
-	expect(node.services.size).toBe(0);
+	expect(hostNode.services.size).toBe(0);
 });
 
-test('WebVM requires an explicit relay set and does not add another path', () => {
-	const node = new MemoryFipsNode();
-	expect(() => createWebvmNostrPubsubService({ node, relayClients: [] }))
-		.toThrow(/At least one shared Nostr relay client/);
-});
-
-test('WebVM rejects pubsub access from non-local FIPS peers', async () => {
-	const node = new MemoryFipsNode();
-	const relayClient = new MemoryRelayClient('wss://relay.example');
-	const bridge = createWebvmNostrPubsubService({
+test('WebVM requires an explicit relay set, local identity, peers, and filters', async () => {
+	const network = new MemoryFipsNetwork();
+	const node = network.node(hostPeerId);
+	await expect(createWebvmNostrPubsubService({
 		node,
-		relayClients: [relayClient],
-		authorizePeer: () => false,
-	});
-	const adapter = new FipsPubsubWireAdapter();
+		localPeerId: hostPeerId,
+		peers: () => [],
+		filters: FILTERS,
+		relayClients: [],
+	})).rejects.toThrow(/At least one shared Nostr relay client/);
+	await expect(createWebvmNostrPubsubService({
+		node,
+		localPeerId: hostPeerId,
+		peers: () => [],
+		filters: [],
+		relayClients: [new MemoryRelayClient('wss://relay.example')],
+	})).rejects.toThrow(/explicit bridge filters/);
+});
 
-	expect(() => node.receive(fipsContext(adapter.encodeOutbound({
-		type: 'req',
-		subscriptionId: 'remote-request',
-		filters: [{ kinds: [7368] }],
-	}), []))).toThrow(/restricted to local Ethernet guests/);
-	expect(relayClient.requests).toHaveLength(0);
-	expect(bridge.stats.unauthorizedPeers).toBe(1);
+test('WebVM rejects reliable pubsub streams from non-local FIPS peers', async () => {
+	const network = new MemoryFipsNetwork();
+	const guest = new FipsNostrPubsubClient({
+		node: network.node(peerId),
+		localPeerId: peerId,
+		peers: () => [hostPeerId],
+		allowedKinds: [7368],
+	}).start();
+	const bridge = await createWebvmNostrPubsubService({
+		node: network.node(hostPeerId),
+		localPeerId: hostPeerId,
+		peers: () => [peerId],
+		filters: FILTERS,
+		relayClients: [new MemoryRelayClient('wss://relay.example')],
+		authorizePeer: () => false,
+		logger: { warn() {} },
+	});
+	guest.subscribe(FILTERS, () => undefined);
+	await settle(bridge, guest);
+	expect(bridge.stats.unauthorizedPeers).toBeGreaterThan(0);
 
 	await bridge.stop();
+	await guest.stop();
 });
 
 test('port 7368 crosses an authenticated in-memory FIPS session end to end', async () => {
 	const hub = new MemoryTransportHub();
 	const hostIdentity = await identityFromSecretKey(new Uint8Array(32).fill(11));
 	const guestIdentity = await identityFromSecretKey(new Uint8Array(32).fill(13));
+	const hostId = toHex(hostIdentity.publicKey);
+	const guestId = toHex(guestIdentity.publicKey);
 	const host = new FipsNode({
 		identity: hostIdentity,
 		transports: [new MemoryTransport(hub)],
 	});
-	const guest = new FipsNode({
+	const guestNode = new FipsNode({
 		identity: guestIdentity,
 		transports: [new MemoryTransport(hub)],
 	});
+	const guest = new FipsNostrPubsubClient({
+		node: guestNode,
+		localPeerId: guestId,
+		peers: () => [hostId],
+		allowedKinds: [7368],
+	}).start();
 	const relayClient = new MemoryRelayClient('wss://relay.example');
-	const bridge = createWebvmNostrPubsubService({
+	const bridge = await createWebvmNostrPubsubService({
 		node: host,
+		localPeerId: hostId,
+		peers: () => [guestId],
+		filters: FILTERS,
 		relayClients: [relayClient],
-		authorizePeer: (peer) => peer === toHex(guestIdentity.publicKey),
+		authorizePeer: (peer) => peer === guestId,
 	});
-	const adapter = new FipsPubsubWireAdapter();
 	await host.start();
-	await guest.start();
+	await guestNode.start();
 
 	try {
-		await guest.connect({ transport: 'memory', addr: toHex(hostIdentity.publicKey) });
-		await guest.sendDatagram({
-			dst: toHex(hostIdentity.publicKey),
-			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			payload: adapter.encodeOutbound({
-				type: 'req',
-				subscriptionId: 'authenticated-request',
-				filters: [{ kinds: [7368], '#p': ['1'.repeat(64)] }],
-			}),
-		});
-		await expect.poll(() => relayClient.requests.length).toBe(1);
+		await guestNode.connect({ transport: 'memory', addr: hostId });
+		// Let the authenticated FSP session replace pre-route TCP attempts before
+		// the clients refresh their admitted peer set.
+		await new Promise((resolve) => setTimeout(resolve, 1_000));
+		bridge.refreshPeers();
+		guest.refreshPeers();
+		const received = [];
+		guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
+		await settle(bridge, guest);
 
-		const response = new Promise((resolve, reject) => {
-			const timer = setTimeout(() => reject(new Error('FIPS pubsub reply timeout')), 5_000);
-			const remove = guest.on('datagram', (message) => {
-				if (message.dstPort !== FIPS_NOSTR_PUBSUB_SERVICE_PORT) return;
-				clearTimeout(timer);
-				remove();
-				resolve(message.payload);
-			});
-		});
 		relayClient.requests[0].handlers.onEvent(event);
-		const reply = adapter.codec.decodeFrame(await response);
-		expect(reply.type).toBe('event');
-		if (reply.type !== 'event') throw new Error('expected EVENT');
-		expect(reply.subscriptionId).toBe('authenticated-request');
+		await settle(bridge, guest);
+		expect(received).toEqual([event.id]);
 
-		await guest.sendDatagram({
-			dst: toHex(hostIdentity.publicKey),
-			srcPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			dstPort: FIPS_NOSTR_PUBSUB_SERVICE_PORT,
-			payload: adapter.encodeOutbound({ type: 'event', event }),
-		});
-		await expect.poll(() => relayClient.published.length).toBe(1);
-		expect(relayClient.published[0].id).toBe(event.id);
+		const published = nextEvent(1_700_000_002, 'authenticated FIPS TCP');
+		await guest.publish(published);
+		await settle(bridge, guest);
+		expect(relayClient.published).toEqual([published]);
 	} finally {
 		await bridge.stop();
 		await guest.stop();
+		await guestNode.stop();
 		await host.stop();
 	}
 });

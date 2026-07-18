@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Replace the datagram-era WebVM Nostr bridge with `nostr-pubsub` 0.5.1's
+  reliable FIPS-TCP client and transport-neutral relay/FIPS router.
+
 ## 2.0.3 - 2026-07-18
 
 - Removed the WebVM-specific nVPN state-control proxy, mesh-ingress hints, and
