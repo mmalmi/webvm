@@ -129,6 +129,11 @@ async function captureState(downloadPath) {
 }
 
 async function main() {
+	await mkdir(outputDirectory, { recursive: true });
+	await writeFile(
+		path.join(outputDirectory, 'snapshot-build-bootstrap.json'),
+		'{"snapshotBuild":true}\n',
+	);
 	await run('npx', ['vite', 'build']);
 	const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'iris-webvm-state-'));
 	const statePath = path.join(temporaryDirectory, 'state.bin');
