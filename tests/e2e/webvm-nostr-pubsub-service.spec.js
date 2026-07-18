@@ -91,6 +91,48 @@ test('WebVM routes relay history and live events plus FIPS publications without 
 	expect(hostNode.services.size).toBe(0);
 });
 
+test('WebVM bounds relay replay until an authenticated local peer is admitted', async () => {
+	const network = new MemoryFipsNetwork();
+	const guest = new FipsNostrPubsubClient({
+		node: network.node(peerId),
+		localPeerId: peerId,
+		peers: () => [hostPeerId],
+		allowedKinds: [7368],
+	}).start();
+	const relayClient = new MemoryRelayClient('wss://relay.example');
+	let admittedPeers = [];
+	const bridge = await createWebvmNostrPubsubService({
+		node: network.node(hostPeerId),
+		localPeerId: hostPeerId,
+		peers: () => admittedPeers,
+		filters: FILTERS,
+		relayClients: [relayClient],
+		authorizePeer: (peer) => peer === peerId,
+		logger: { warn() {} },
+	});
+	const received = [];
+
+	for (let index = 0; index < 80; index += 1) {
+		relayClient.requests[0].handlers.onEvent(nextEvent(1_700_001_000 + index, `queued ${index}`));
+	}
+	await settle(bridge, guest);
+	expect(received).toEqual([]);
+	expect(bridge.stats.serviceErrors).toBe(0);
+	expect(bridge.stats.deferredRelayEvents).toBe(64);
+	expect(bridge.stats.droppedDeferredRelayEvents).toBe(16);
+
+	admittedPeers = [peerId];
+	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
+	bridge.refreshPeers();
+	await settle(bridge, guest);
+	expect(received).toHaveLength(FILTERS[0].limit);
+	expect(bridge.stats.deferredRelayEvents).toBe(0);
+	expect(bridge.stats.flushedDeferredRelayEvents).toBe(64);
+
+	await bridge.stop();
+	await guest.stop();
+});
+
 test('WebVM requires an explicit relay set, local identity, peers, and filters', async () => {
 	const network = new MemoryFipsNetwork();
 	const node = network.node(hostPeerId);

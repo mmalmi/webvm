@@ -13,4 +13,9 @@ export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([
 	'stun:stun.cloudflare.com:3478',
 ]);
 
+export const WEBVM_NOSTR_PUBSUB_FILTERS = Object.freeze([
+	Object.freeze({ kinds: Object.freeze([37_195, 37_196, 7_368]), limit: 32 }),
+	Object.freeze({ kinds: Object.freeze([30_064, 30_078]), limit: 32 }),
+]);
+
 export const WEBVM_FIPS_UNDERLAY_MTU = 1280;

@@ -9,6 +9,7 @@ import {
 } from 'nostr-pubsub';
 
 const COMPRESSED_FIPS_KEY = /^(?:02|03)[0-9a-f]{64}$/u;
+const MAX_DEFERRED_RELAY_EVENTS = 64;
 const allowBridgeRoutes = {
 	checkEvent: () => allowWithPriority(0),
 	checkSource: () => allowWithPriority(0),
@@ -163,6 +164,9 @@ export async function createWebvmNostrPubsubService({
 		relaySubscriptionFailures: 0,
 		relayEvents: 0,
 		publishBatches: 0,
+		deferredRelayEvents: 0,
+		droppedDeferredRelayEvents: 0,
+		flushedDeferredRelayEvents: 0,
 		serviceErrors: 0,
 		serviceErrorOperations: {},
 		lastServiceError: '',
@@ -203,6 +207,51 @@ export async function createWebvmNostrPubsubService({
 		stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
 		logger.warn?.('WebVM Nostr pubsub router error', context, error);
 	};
+	const deferredRelayEvents = new Map();
+	const pending = new Set();
+	let relayFlush = null;
+	let relayFlushBlocked = false;
+	let stopped = false;
+	const updateDeferredRelayEventCount = () => {
+		stats.deferredRelayEvents = deferredRelayEvents.size;
+	};
+	const deferRelayEvent = (incoming) => {
+		const eventId = incoming.event.id;
+		if (deferredRelayEvents.has(eventId)) deferredRelayEvents.delete(eventId);
+		while (deferredRelayEvents.size >= MAX_DEFERRED_RELAY_EVENTS) {
+			deferredRelayEvents.delete(deferredRelayEvents.keys().next().value);
+			stats.droppedDeferredRelayEvents += 1;
+		}
+		deferredRelayEvents.set(eventId, incoming);
+		updateDeferredRelayEventCount();
+	};
+	const flushDeferredRelayEvents = () => {
+		if (stopped || relayFlush || relayFlushBlocked
+			|| deferredRelayEvents.size === 0 || admittedPeers().length === 0) return;
+		const task = (async () => {
+			while (!stopped && deferredRelayEvents.size > 0 && admittedPeers().length > 0) {
+				const [eventId, incoming] = deferredRelayEvents.entries().next().value;
+				deferredRelayEvents.delete(eventId);
+				updateDeferredRelayEventCount();
+				try {
+					await fips.publish(incoming.event, incoming.source);
+					stats.flushedDeferredRelayEvents += 1;
+				} catch (error) {
+					deferRelayEvent(incoming);
+					relayFlushBlocked = true;
+					reportError(error, { operation: 'relay-to-fips' });
+					break;
+				}
+			}
+		})();
+		const tracked = task.finally(() => {
+			pending.delete(tracked);
+			relayFlush = null;
+			if (!relayFlushBlocked) flushDeferredRelayEvents();
+		});
+		relayFlush = tracked;
+		pending.add(tracked);
+	};
 	const client = new FipsNostrPubsubClient({
 		node: authorizedNode,
 		localPeerId: localPeerId.toLowerCase(),
@@ -225,7 +274,6 @@ export async function createWebvmNostrPubsubService({
 			{ route: relayRouteEntry, subscriber: relay },
 		],
 	});
-	const pending = new Set();
 	const forward = (promise, context) => {
 		const tracked = Promise.resolve(promise)
 			.catch((error) => reportError(error, context))
@@ -236,7 +284,8 @@ export async function createWebvmNostrPubsubService({
 	try {
 		subscription = await router.subscribeWithOptions(bridgeFilters, (incoming) => {
 			if (incoming.route.id === relayRouteEntry.id) {
-				forward(fips.publish(incoming.event, incoming.source), { operation: 'relay-to-fips' });
+				deferRelayEvent(incoming);
+				flushDeferredRelayEvents();
 				return;
 			}
 			forward(relay.publish(incoming.event, incoming.source), { operation: 'fips-to-relay' });
@@ -246,7 +295,6 @@ export async function createWebvmNostrPubsubService({
 		throw error;
 	}
 
-	let stopped = false;
 	return {
 		client,
 		router,
@@ -254,6 +302,8 @@ export async function createWebvmNostrPubsubService({
 		relays: relayUrls,
 		refreshPeers() {
 			client.refreshPeers();
+			relayFlushBlocked = false;
+			flushDeferredRelayEvents();
 		},
 		async idle() {
 			await client.idle();

@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
 	DEFAULT_FIPS_RELAYS,
 	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
+	WEBVM_NOSTR_PUBSUB_FILTERS,
 } from '../../src/lib/webvmFipsConfig.js';
 
 test('browser FIPS bootstraps through the two explicit authenticated WSS seeds', () => {
@@ -13,6 +14,8 @@ test('browser FIPS bootstraps through the two explicit authenticated WSS seeds',
 		'wss://fips2.iris.to/fips',
 	]);
 	assert.deepEqual(DEFAULT_FIPS_RELAYS, ['wss://temp.iris.to']);
+	assert.equal(WEBVM_NOSTR_PUBSUB_FILTERS.length, 2);
+	assert.ok(WEBVM_NOSTR_PUBSUB_FILTERS.every((filter) => filter.limit === 32));
 });
 
 test('browser FIPS contains no Nostr packet transport or companion carrier', () => {
