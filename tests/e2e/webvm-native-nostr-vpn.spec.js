@@ -7,6 +7,7 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
+import { DEFAULT_FIPS_WEBSOCKET_SEED_URLS } from '../../src/lib/webvmFipsConfig.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
@@ -96,6 +97,10 @@ function runStandardApproval({ fixture, request, dataDir }) {
 			request,
 			'--nvpn-bin',
 			fixture.binary,
+			...DEFAULT_FIPS_WEBSOCKET_SEED_URLS.flatMap((url) => [
+				'--fips-websocket-seed-url',
+				url,
+			]),
 			'--timeout-secs',
 			'90',
 		], {
@@ -145,7 +150,7 @@ function runStandardApproval({ fixture, request, dataDir }) {
 	});
 }
 
-test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async ({ page }) => {
+test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink', async ({ page }) => {
 	test.setTimeout(420_000);
 	const fixture = inspectNativeFixture();
 	const dataDir = mkdtempSync(path.join(tmpdir(), 'nvpn-standard-join-e2e-'));
