@@ -185,8 +185,15 @@ test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async (
 			const guest = await runSerialCommand(
 				page,
 				'nVPN uplink diagnostics',
-				"rc-service webvm-nvpn status || true; echo __LOG__; " +
-					"cat /var/log/webvm-nvpn.log 2>&1 || true; echo __LINKS__; ip link; " +
+				"rc-service webvm-nvpn status || true; echo __DAEMON_FILES__; " +
+					"ls -la /var/lib/nvpn; echo __CONTROL_RESULT__; " +
+					"cat /var/lib/nvpn/daemon.control.result.json 2>&1 || true; echo __STATE__; " +
+					"cat /var/lib/nvpn/daemon.state.json 2>&1 || true; echo __LOG__; " +
+					"cat /var/lib/nvpn/daemon.log 2>&1 || true; " +
+					"echo __PID__; cat /var/lib/nvpn/daemon.pid 2>&1 || true; echo __CMDLINE__; " +
+					"tr '\\0' ' ' </proc/$(sed -n 's/.*\"pid\": \\([0-9]*\\).*/\\1/p' " +
+					"/var/lib/nvpn/daemon.pid)/cmdline 2>&1 || true; echo; " +
+					"echo __LINKS__; ip link; " +
 					"echo __SCOPE__; cat /run/webvm/fips-discovery-scope 2>&1 || true; " +
 					"echo __PROCESSES__; ps; true",
 				30_000,
@@ -195,7 +202,10 @@ test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async (
 				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
 				state: globalThis.irisWebvmV86?.state?.(),
 			}));
-			throw new Error(`${error.message}\nGuest:\n${guest.join('\n')}\nBrowser:\n${JSON.stringify(browser)}`);
+			throw new Error(
+				`${error.message}\nJoin:\n${output.join('\n')}\nGuest:\n${guest.join('\n')}` +
+					`\nBrowser:\n${JSON.stringify(browser)}`,
+			);
 		}
 
 		const approvalEvents = await runStandardApproval({ fixture, request, dataDir });
