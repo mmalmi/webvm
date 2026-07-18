@@ -18,6 +18,7 @@ import {
 	DEFAULT_FIPS_STUN_SERVERS,
 	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
 	WEBVM_FIPS_UNDERLAY_MTU,
+	WEBVM_NOSTR_PUBSUB_FILTERS,
 } from '$lib/webvmFipsConfig.js';
 import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
@@ -27,12 +28,8 @@ export {
 	DEFAULT_FIPS_STUN_SERVERS,
 	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
 	WEBVM_FIPS_UNDERLAY_MTU,
+	WEBVM_NOSTR_PUBSUB_FILTERS,
 } from '$lib/webvmFipsConfig.js';
-
-export const WEBVM_NOSTR_PUBSUB_FILTERS = Object.freeze([
-	Object.freeze({ kinds: Object.freeze([37_195, 37_196, 7_368]) }),
-	Object.freeze({ kinds: Object.freeze([30_064, 30_078]) }),
-]);
 
 function macForIdentity(identity) {
 	const mac = new Uint8Array(6);

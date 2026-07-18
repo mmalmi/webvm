@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -228,14 +228,8 @@ test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink',
 				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
 				state: globalThis.irisWebvmV86?.state?.(),
 			}));
-			let adminConfig = '';
-			try {
-				adminConfig = readFileSync(path.join(dataDir, 'config.toml'), 'utf8');
-			} catch (readError) {
-				adminConfig = `unavailable: ${readError.message}`;
-			}
 			throw new Error(
-				`${error.message}\nAdmin config:\n${adminConfig}\nGuest:\n${guest.join('\n')}` +
+				`${error.message}\nGuest:\n${guest.join('\n')}` +
 					`\nBrowser:\n${JSON.stringify(browser)}`,
 			);
 		}
@@ -257,7 +251,8 @@ test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink',
 		expect(stats.subscriptionBatches).toBeGreaterThan(0);
 		expect(stats.relaySubscriptions).toBeGreaterThan(0);
 		expect(stats.relayEvents).toBeGreaterThan(0);
-		expect(stats.publishBatches).toBeGreaterThan(0);
+		expect(stats.flushedDeferredRelayEvents).toBeGreaterThan(0);
+		expect(stats.deferredRelayEvents).toBeLessThanOrEqual(64);
 		expect(stats.serviceErrors).toBe(0);
 		expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
 	} finally {
