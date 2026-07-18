@@ -115,6 +115,7 @@ function installMockV86(page) {
 					nodeAddrHex: 'b'.repeat(32),
 					ethernetPeers: 1,
 					webrtcPeers: 2,
+					websocketPeers: 2,
 				});
 				return {
 					stop() {

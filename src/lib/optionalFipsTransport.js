@@ -71,11 +71,5 @@ export function createOptionalFipsTransport(transport, {
 			await transport.handleLinkNegotiation(remotePubkeyHex, message);
 		};
 	}
-	if (transport.companionTransports) {
-		optional.companionTransports = () => transport.companionTransports().map((companion) => (
-			createOptionalFipsTransport(companion, { logger, onUnavailable })
-		));
-	}
-
 	return optional;
 }

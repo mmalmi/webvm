@@ -66,6 +66,7 @@ ${WELCOME_BORDER}
 		lastPeerError: '',
 		ethernetPeers: 0,
 		webrtcPeers: 0,
+		websocketPeers: 0,
 	};
 	let removeEmulatorListeners = [];
 
@@ -451,7 +452,9 @@ ${WELCOME_BORDER}
 		<div data-testid="v86-fips-state">
 			{fipsStatus.state === 'ready' ? 'FIPS connected' : `FIPS ${fipsStatus.state}`}
 		</div>
-		<div>Ethernet {fipsStatus.ethernetPeers} · WebRTC {fipsStatus.webrtcPeers}</div>
+		<div>
+			Ethernet {fipsStatus.ethernetPeers} · WebSocket {fipsStatus.websocketPeers} · WebRTC {fipsStatus.webrtcPeers}
+		</div>
 	</header>
 
 	{#if vmError || fipsStatus.error}

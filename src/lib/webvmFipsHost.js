@@ -10,22 +10,24 @@ import {
 	NostrRelayClient,
 	WebRtcTransport,
 } from '@fips/transport-webrtc';
+import { WebSocketTransport } from '@fips/transport-websocket';
 import { createV86EthernetFramePort } from '$lib/v86EthernetFramePort.js';
 import { createOptionalFipsTransport } from '$lib/optionalFipsTransport.js';
+import {
+	DEFAULT_FIPS_RELAYS,
+	DEFAULT_FIPS_STUN_SERVERS,
+	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
+	WEBVM_FIPS_UNDERLAY_MTU,
+} from '$lib/webvmFipsConfig.js';
 import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
-export const DEFAULT_FIPS_RELAYS = Object.freeze([
-	'wss://temp.iris.to',
-]);
-
-export const DEFAULT_FIPS_STUN_SERVERS = Object.freeze([
-	'stun:stun.iris.to:3478',
-	'stun:stun.l.google.com:19302',
-	'stun:stun.cloudflare.com:3478',
-]);
-
-export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
+export {
+	DEFAULT_FIPS_RELAYS,
+	DEFAULT_FIPS_STUN_SERVERS,
+	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
+	WEBVM_FIPS_UNDERLAY_MTU,
+} from '$lib/webvmFipsConfig.js';
 
 function macForIdentity(identity) {
 	const mac = new Uint8Array(6);
@@ -38,6 +40,7 @@ export async function createWebvmFipsHost({
 	emulator,
 	relays = DEFAULT_FIPS_RELAYS,
 	relayClients,
+	websocketSeedUrls = DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
 	discoveryApp = FIPS_DEFAULT_DISCOVERY_APP,
 	stunServers = DEFAULT_FIPS_STUN_SERVERS,
 	logger = noopLogger,
@@ -58,6 +61,11 @@ export async function createWebvmFipsHost({
 		announce: true,
 		discoveryScope: discoveryApp,
 		beaconIntervalMs: 10_000,
+	});
+	const websocket = new WebSocketTransport({
+		seedUrls: [...websocketSeedUrls],
+		mtu: WEBVM_FIPS_UNDERLAY_MTU,
+		logger,
 	});
 	const webrtc = new WebRtcTransport({
 		relays: [...relays],
@@ -84,6 +92,7 @@ export async function createWebvmFipsHost({
 		identity,
 		transports: [
 			ethernet,
+			websocket,
 			createOptionalFipsTransport(webrtc, {
 				logger,
 				onUnavailable: ({ type, error }) => {
@@ -104,8 +113,10 @@ export async function createWebvmFipsHost({
 		logger,
 	});
 	const webrtcPeerKeys = new Set();
+	const websocketPeerKeys = new Set();
 	let ethernetPeers = 0;
 	let webrtcPeers = 0;
+	let websocketPeers = 0;
 	let lastPeerError = '';
 	let lastPeerErrorWhere = '';
 	const publishStatus = (state = 'ready', error = '') => {
@@ -118,6 +129,8 @@ export async function createWebvmFipsHost({
 			nodeAddrHex: nodeAddrToHex(identity.nodeAddr),
 			ethernetPeers,
 			webrtcPeers,
+			websocketPeers,
+			websocketStats: websocket.stats(),
 			carrierErrors: [...carrierErrors],
 		});
 	};
@@ -137,8 +150,15 @@ export async function createWebvmFipsHost({
 			}
 			else webrtcPeerKeys.delete(peer);
 		}
+		if (event?.remoteAddr?.transport === 'websocket') {
+			if (connected) {
+				websocketPeerKeys.add(peer);
+			}
+			else websocketPeerKeys.delete(peer);
+		}
 		ethernetPeers = localEthernetPeers.size;
 		webrtcPeers = webrtcPeerKeys.size;
+		websocketPeers = websocketPeerKeys.size;
 		publishStatus();
 	});
 	const removeErrorListener = node.on('error', (event) => {
@@ -166,6 +186,7 @@ export async function createWebvmFipsHost({
 		identity,
 		node,
 		ethernet,
+		websocket,
 		webrtc,
 		pubsub,
 		ethernetFrameStats: framePort.stats,
