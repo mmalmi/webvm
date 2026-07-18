@@ -4,7 +4,7 @@ The production architecture keeps VPN policy inside the Linux guest:
 
 1. v86 restores a preinitialized, automatically logged-in Alpine i686 state over the same-origin content-addressed 9p image.
 2. The browser runs a generic FIPS node with virtual Ethernet and WebRTC transports and forwarding enabled.
-3. Guest FIPS applications use the browser's local Ethernet carrier and generic pubsub relay service.
+3. The ordinary nVPN daemon discovers the browser through FIPS Ethernet beacons. Guest applications use its generic pubsub relay service on that authenticated session; no guest IP address, DHCP, mDNS, or fixed browser npub is required.
 4. `nvpn join-request` displays the guest's stable authenticated join-request link and terminal QR; it waits for approval by default.
 5. An admin scans or pastes that request in Nostr VPN. Network invites are not part of the WebVM onboarding flow.
 6. The browser treats nVPN like every other guest application: it relays generic pubsub traffic but does not inspect, route, proxy, or persist nVPN join/control records.

@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
+
+import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
@@ -73,25 +79,125 @@ async function runSerialCommand(page, label, command, timeoutMs = 60_000) {
 	return result.output.map((line) => line.trim()).filter(Boolean);
 }
 
-test('WebVM uses the ordinary nVPN binary and join-request flow', async ({ page }) => {
-	test.setTimeout(240_000);
+function runStandardApproval({ fixture, request, dataDir }) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.env.CARGO || 'cargo', [
+			'run',
+			'--quiet',
+			'--locked',
+			'--manifest-path',
+			fixture.manifest,
+			'--example',
+			'standard_join_approval_e2e',
+			'--',
+			'--data-dir',
+			dataDir,
+			'--join-request',
+			request,
+			'--nvpn-bin',
+			fixture.binary,
+			'--timeout-secs',
+			'90',
+		], {
+			cwd: fixture.repository,
+			env: {
+				...process.env,
+				RUSTC_WRAPPER: '',
+				RUST_LOG: process.env.NVPN_STANDARD_JOIN_RUST_LOG || 'off',
+			},
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
+		let stdout = '';
+		let stderr = '';
+		const events = [];
+		const timeout = setTimeout(() => {
+			child.kill('SIGTERM');
+			reject(new Error(`standard approval helper timed out: ${stderr}`));
+		}, 120_000);
+		child.stdout.on('data', (chunk) => {
+			stdout += chunk.toString();
+			for (;;) {
+				const newline = stdout.indexOf('\n');
+				if (newline < 0) break;
+				const line = stdout.slice(0, newline).trim();
+				stdout = stdout.slice(newline + 1);
+				if (line) events.push(JSON.parse(line));
+			}
+		});
+		child.stderr.on('data', (chunk) => {
+			stderr = `${stderr}${chunk}`.slice(-12_000);
+		});
+		child.on('error', (error) => {
+			clearTimeout(timeout);
+			reject(error);
+		});
+		child.on('close', (code, signal) => {
+			clearTimeout(timeout);
+			if (code !== 0 || signal) {
+				reject(new Error(
+					`standard approval helper exited ${signal || code}: ${stderr}`
+					+ `\n${events.map((event) => JSON.stringify(event)).join('\n')}`,
+				));
+				return;
+			}
+			resolve(events);
+		});
+	});
+}
+
+test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async ({ page }) => {
+	test.setTimeout(420_000);
+	const fixture = inspectNativeFixture();
+	const dataDir = mkdtempSync(path.join(tmpdir(), 'nvpn-standard-join-e2e-'));
 	await page.goto('/v86');
 	await attachSerial(page);
-	await waitUntil(
-		() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
-		{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
-	);
+	try {
+		await waitUntil(
+			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
+			{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
+		);
+		await waitUntil(
+			() => page.evaluate(() => (
+				globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats?.subscriptionBatches || 0
+			) > 0),
+			{ timeoutMs: 120_000, message: 'ordinary nVPN daemon did not open the FIPS pubsub uplink' },
+		);
 
-	const output = await runSerialCommand(
-		page,
-		'normal nVPN join request',
-		"! grep -q -- '--webvm-' /usr/local/sbin/webvm-nvpn " +
-			'&& ! nvpn webvm-guest --help >/dev/null 2>&1 ' +
-			'&& nvpn join-request --no-qr --no-wait',
-	);
-	const request = output.find((line) => line.startsWith('nvpn://join-request/'));
-	expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/u);
+		const output = await runSerialCommand(
+			page,
+			'normal nVPN join request',
+			"! grep -q -- '--webvm-' /usr/local/sbin/webvm-nvpn " +
+				"&& grep -qF -- '--fips-ethernet-interface' /usr/local/sbin/webvm-nvpn " +
+				"&& grep -qF -- '--fips-ethernet-discovery-scope' /usr/local/sbin/webvm-nvpn " +
+				'&& ! nvpn webvm-guest --help >/dev/null 2>&1 ' +
+				'&& nvpn join-request --no-qr --no-wait',
+		);
+		const request = output.find((line) => line.startsWith('nvpn://join-request/'));
+		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/u);
 
-	const stats = await page.evaluate(() => globalThis.irisWebvmV86.fipsHost.pubsub.stats);
-	expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
+		const approvalEvents = await runStandardApproval({ fixture, request, dataDir });
+		expect(approvalEvents).toEqual(expect.arrayContaining([
+			expect.objectContaining({ ok: true, event: 'approved', queueDepth: 1 }),
+			expect.objectContaining({ ok: true, event: 'delivered', queueDrained: true }),
+		]));
+		const approved = await runSerialCommand(
+			page,
+			'normal signed-roster approval',
+			"for i in $(seq 1 120); do result=$(nvpn join-request --no-qr --no-wait); " +
+				'printf \'%s\\n\' "$result"; echo "$result" | grep -q \'Already approved for network\' ' +
+				"&& exit 0; sleep 0.5; done; exit 1",
+			90_000,
+		);
+		expect(approved.join('\n')).toContain('Already approved for network');
+
+		const stats = await page.evaluate(() => globalThis.irisWebvmV86.fipsHost.pubsub.stats);
+		expect(stats.subscriptionBatches).toBeGreaterThan(0);
+		expect(stats.relaySubscriptions).toBeGreaterThan(0);
+		expect(stats.relayEvents).toBeGreaterThan(0);
+		expect(stats.publishBatches).toBeGreaterThan(0);
+		expect(stats.serviceErrors).toBe(0);
+		expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
 });

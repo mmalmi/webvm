@@ -4,7 +4,8 @@
 
 - Removed the WebVM-specific nVPN state-control proxy, mesh-ingress hints, and
   daemon flags. The guest now ships the ordinary `nvpn` binary and uses its
-  standard `join-request` flow over the generic FIPS pubsub service.
+  standard `join-request` flow. The ordinary daemon discovers the browser as
+  a generic FIPS Ethernet peer and uses the standard pubsub relay service.
 
 ## 2.0.2 - 2026-07-17
 

@@ -48,6 +48,8 @@ RUN chmod 0755 \
       /etc/init.d/webvm-nvpn \
       /etc/profile.d/webvm.sh && \
     nvpn daemon --help >/dev/null && \
+    nvpn daemon --help | grep -F -- '--fips-ethernet-interface' >/dev/null && \
+    nvpn daemon --help | grep -F -- '--fips-ethernet-discovery-scope' >/dev/null && \
     nvpn join-request --help >/dev/null && \
     ! nvpn webvm-guest --help >/dev/null 2>&1 && \
     sed -i 's/getty 38400 tty1/agetty --autologin root tty1 linux/' /etc/inittab && \
