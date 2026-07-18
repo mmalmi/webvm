@@ -49,6 +49,7 @@ RUN chmod 0755 \
       /etc/profile.d/webvm.sh && \
     nvpn daemon --help >/dev/null && \
     nvpn join-request --help >/dev/null && \
+    ! nvpn webvm-guest --help >/dev/null 2>&1 && \
     sed -i 's/getty 38400 tty1/agetty --autologin root tty1 linux/' /etc/inittab && \
     printf '%s\n' 'ttyS0::respawn:/sbin/agetty --autologin root -s ttyS0 115200 vt100' >> /etc/inittab && \
     printf 'root:\n' | chpasswd && \

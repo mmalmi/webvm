@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.3 - 2026-07-18
+
+- Removed the WebVM-specific nVPN state-control proxy, mesh-ingress hints, and
+  daemon flags. The guest now ships the ordinary `nvpn` binary and uses its
+  standard `join-request` flow over the generic FIPS pubsub service.
+
 ## 2.0.2 - 2026-07-17
 
 - Proxy nVPN state-control records over the existing authenticated FIPS-TCP

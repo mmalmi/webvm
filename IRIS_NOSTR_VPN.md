@@ -4,13 +4,13 @@ The production architecture keeps VPN policy inside the Linux guest:
 
 1. v86 restores a preinitialized, automatically logged-in Alpine i686 state over the same-origin content-addressed 9p image.
 2. The browser runs a generic FIPS node with virtual Ethernet and WebRTC transports and forwarding enabled.
-3. Guest FIPS uses only `eth0`; it does not open independent relay, UDP, TCP, or WebRTC transports.
+3. Guest FIPS applications use the browser's local Ethernet carrier and generic pubsub relay service.
 4. `nvpn join-request` displays the guest's stable authenticated join-request link and terminal QR; it waits for approval by default.
 5. An admin scans or pastes that request in Nostr VPN. Network invites are not part of the WebVM onboarding flow.
-6. The browser's FIPS node exposes a narrowly authorized pubsub service only to its local Ethernet guest, carrying the admin's signed approval back over routed FIPS application datagrams. This does not change the FIPS protocol or give `eth0` an IP route.
+6. The browser treats nVPN like every other guest application: it relays generic pubsub traffic but does not inspect, route, proxy, or persist nVPN join/control records.
 7. The normal guest `nvpn daemon` applies the signed roster, reports the transition through `nvpn status`, and enables the TUN for private/public traffic through the selected exit peer.
 
-The shipped state is captured before Hashtree or Nostr VPN starts, so it contains no reusable guest identity. Each browser starts those services after restore and creates its own keys. There is no browser VPN identity, pairing panel, packet gateway, or fallback network path.
+The shipped state is captured before Hashtree or Nostr VPN starts, so it contains no reusable guest identity. Each browser starts those services after restore and creates its own keys. There is no browser VPN identity, pairing panel, nVPN control proxy, or WebVM-specific nVPN runtime.
 
 ## Guest Tools
 

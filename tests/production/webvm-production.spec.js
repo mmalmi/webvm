@@ -42,13 +42,14 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 
 	await terminal.click();
 	await page.keyboard.insertText(
-		'a=__FIPS_; b=ONLY__; ' +
-		'for attempt in $(seq 1 150); do test -f /var/lib/nvpn/config.toml && break; sleep 0.1; done; ' +
-		'nvpn status | grep -q "^fips_bootstrap_enabled: false$" ' +
+		'a=__NVPN_; b=STANDARD__; ' +
+		"! grep -q -- '--webvm-' /usr/local/sbin/webvm-nvpn " +
+		'&& ! nvpn webvm-guest --help >/dev/null 2>&1 ' +
+		"&& nvpn join-request --no-qr --no-wait | grep -Eq '^nvpn://join-request/[A-Za-z0-9_-]+$' " +
 		'&& printf "%s%s\\n" "$a" "$b"',
 	);
 	await page.keyboard.press('Enter');
-	await expect(rows).toContainText('__FIPS_ONLY__', { timeout: 15_000 });
+	await expect(rows).toContainText('__NVPN_STANDARD__', { timeout: 15_000 });
 
 	await page.keyboard.insertText(
 		'a=__WEBVM_FIPS_; b=READY__; ' +

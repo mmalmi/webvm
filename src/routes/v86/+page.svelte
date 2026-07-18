@@ -4,7 +4,6 @@
 	import VmToolbar from '$lib/VmToolbar.svelte';
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
-	import { clearPreferredWebvmFipsIngresses } from '$lib/webvmFipsIngress.js';
 	import { attachWebvmDisk } from '$lib/webvmDisk.js';
 	import { installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
 	import '$lib/global.css';
@@ -197,9 +196,6 @@ ${WELCOME_BORDER}
 				`hostname webvm; export PS1='root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
-					`for attempt in $(seq 1 150); do ` +
-					`grep -q "^# Managed by nvpn WebVM FIPS$" /etc/resolv.conf && break; ` +
-					`sleep 0.1; done; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
 				`{ grep -v '__IRIS_WEBVM_' /root/.ash_history 2>/dev/null || true; } ` +
 				`> /root/.ash_history.iris-resume; history -c 2>/dev/null; ` +
@@ -279,7 +275,6 @@ ${WELCOME_BORDER}
 		diskStatus = 'resetting';
 		await diskController?.reset();
 		clearWebvmFipsIdentity();
-		clearPreferredWebvmFipsIngresses();
 		globalThis.location.reload();
 	}
 

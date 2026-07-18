@@ -79,7 +79,7 @@ async function invalidateSavedDiskCompatibility(page) {
 	});
 }
 
-test('real v86 preserves approved nVPN state across a guest upgrade', async ({ page }) => {
+test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ page }) => {
 	await page.goto('/v86');
 	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
 		.toContainText('Starting FIPS networking...');

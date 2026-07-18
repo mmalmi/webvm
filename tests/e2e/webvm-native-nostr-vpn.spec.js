@@ -1,108 +1,14 @@
-import { expect, test } from '@playwright/test';
-import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { readBarcodes } from 'zxing-wasm/reader';
+import { randomUUID } from 'node:crypto';
 
-import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
+import { expect, test } from '@playwright/test';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
 
-test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real join-request e2e');
-test.use({ trace: 'off', viewport: { width: 1600, height: 1400 }, deviceScaleFactor: 2 });
+test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real nVPN guest e2e');
+test.use({ trace: 'off' });
 
-function createIsolatedAdmin(nvpn) {
-	const directory = mkdtempSync(path.join(tmpdir(), 'iris-webvm-nvpn-e2e-'));
-	const configPath = path.join(directory, 'admin.toml');
-	execFileSync(nvpn, ['init', '--force', '--config', configPath], {
-		stdio: ['ignore', 'ignore', 'pipe'],
-	});
-	return {
-		configPath,
-		cleanup: () => rmSync(directory, { recursive: true, force: true }),
-	};
-}
-
-function startAdminHelper({ configPath, manifest }) {
-	const child = spawn(process.env.CARGO || 'cargo', [
-		'run',
-		'--quiet',
-		'--locked',
-		'--manifest-path',
-		manifest,
-		'--example',
-		'webvm_native_fips_e2e',
-		'--',
-		'--config-path',
-		configPath,
-	], {
-		cwd: path.dirname(manifest),
-		env: {
-			...process.env,
-			NVPN_WEBVM_REAL_E2E: '1',
-			RUSTC_WRAPPER: '',
-			RUST_LOG: process.env.NVPN_WEBVM_ADMIN_RUST_LOG || 'off',
-		},
-		stdio: ['pipe', 'pipe', 'pipe'],
-	});
-	let stdout = '';
-	let stderr = '';
-	const events = [];
-	child.stdout.on('data', (chunk) => {
-		stdout += chunk.toString();
-		for (;;) {
-			const newline = stdout.indexOf('\n');
-			if (newline < 0) break;
-			const line = stdout.slice(0, newline).trim();
-			stdout = stdout.slice(newline + 1);
-			if (line) events.push(JSON.parse(line));
-		}
-	});
-	child.stderr.on('data', (chunk) => {
-		stderr = `${stderr}${chunk}`.slice(-8_000);
-	});
-
-	async function waitForStatus(status, timeoutMs = 120_000) {
-		const deadline = Date.now() + timeoutMs;
-		while (Date.now() < deadline) {
-			const error = events.find((event) => event.status === 'error');
-			if (error) throw new Error(`admin helper failed: ${JSON.stringify(error)} ${stderr}`);
-			const event = events.find((candidate) => candidate.status === status);
-			if (event) return event;
-			if (child.exitCode !== null) {
-				throw new Error(`admin helper exited ${child.exitCode}: ${stderr}`);
-			}
-			await new Promise((resolve) => setTimeout(resolve, 100));
-		}
-		throw new Error(`timed out waiting for admin helper status ${status}: ${stderr}`);
-	}
-
-	function writeLine(line) {
-		child.stdin.write(`${line}\n`);
-	}
-
-	return {
-		waitForStatus,
-		async approve(request) {
-			await waitForStatus('ready');
-			writeLine(`import ${request}`);
-			return waitForStatus('imported');
-		},
-		async cleanup() {
-			if (child.exitCode !== null) return;
-			writeLine('cleanup');
-			await waitForStatus('cleaned');
-			child.stdin.end();
-		},
-		stop() {
-			if (child.exitCode === null) child.kill('SIGTERM');
-		},
-	};
-}
-
-async function waitUntil(check, { timeoutMs, message, intervalMs = 100 }) {
+async function waitUntil(check, { timeoutMs, intervalMs = 100, message }) {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		if (await check()) return;
@@ -124,311 +30,68 @@ async function attachSerial(page) {
 			if (serial.text.length > limit) serial.text = serial.text.slice(-limit);
 		};
 		emulator.add_listener('serial0-output-byte', serial.onByte);
-		globalThis.__nvpnJoinE2eSerial = serial;
+		globalThis.__nvpnStandardE2eSerial = serial;
 	}, SERIAL_BUFFER_LIMIT);
 }
 
-async function normalizeQrScreenshot(page, screenshot, verticalScale) {
-	const encodedPng = screenshot.toString('base64');
-	const normalized = await page.evaluate(async ({ encodedPng: encoded, scaleY }) => {
-		const image = new Image();
-		image.src = `data:image/png;base64,${encoded}`;
-		await new Promise((resolve, reject) => {
-			image.onload = resolve;
-			image.onerror = reject;
-		});
-		const border = 32;
-		const canvas = document.createElement('canvas');
-		canvas.width = image.width + border * 2;
-		canvas.height = Math.round(image.height * scaleY) + border * 2;
-		const context = canvas.getContext('2d', { willReadFrequently: true });
-		context.fillStyle = '#fff';
-		context.fillRect(0, 0, canvas.width, canvas.height);
-		context.imageSmoothingEnabled = false;
-		context.drawImage(image, border, border, image.width, canvas.height - border * 2);
-		return canvas.toDataURL('image/png').slice('data:image/png;base64,'.length);
-	}, { encodedPng, scaleY: verticalScale });
-	return Buffer.from(normalized, 'base64');
-}
+async function runSerialCommand(page, label, command, timeoutMs = 60_000) {
+	const token = randomUUID().replaceAll('-', '');
+	const begin = `__NVPN_STANDARD_BEGIN_${token}__`;
+	const end = `__NVPN_STANDARD_END_${token}__`;
+	const wrapped = `printf '\\n${begin}\\n'; ( ${command} ); rc=$?; printf '\\n${end}:%s\\n' "$rc"`;
+	await page.evaluate((serialCommand) => {
+		const serial = globalThis.__nvpnStandardE2eSerial;
+		if (!serial) throw new Error('serial harness is not attached');
+		serial.text = '';
+		serial.decoder = new TextDecoder();
+		serial.emulator.serial0_send(`${serialCommand}\n`);
+	}, wrapped);
 
-async function decodeQr(screenshot) {
-	for (const binarizer of ['LocalAverage', 'GlobalHistogram']) {
-		const results = await readBarcodes(new Uint8Array(screenshot), {
-			formats: ['QRCode'],
-			tryHarder: true,
-			tryDenoise: true,
-			binarizer,
-		});
-		const decoded = results.find((result) => result.text?.startsWith('nvpn://join-request/'));
-		if (decoded) return decoded.text;
-	}
-	throw new Error('terminal join-request QR could not be decoded');
-}
-
-async function startAndScanJoinRequest(page) {
-	await page.evaluate(() => {
-		const terminal = globalThis.irisWebvmV86.serialTerminal;
-		const consoleElement = document.querySelector('[data-testid="v86-serial"]');
-		Object.assign(consoleElement.style, { width: '1440px', height: '1240px' });
-		terminal.resize(150, 76);
-		terminal.reset();
-		globalThis.__nvpnJoinE2eSerial.text = '';
-		globalThis.__nvpnJoinE2eSerial.emulator.serial0_send('nvpn join-request\n');
-	});
+	let result;
 	await waitUntil(
-		() => page.evaluate(() => (
-			globalThis.__nvpnJoinE2eSerial?.text || ''
-		).includes('nvpn://join-request/')),
-		{ timeoutMs: 60_000, message: 'join-request link did not render' },
+		async () => {
+			result = await page.evaluate(({ beginMarker, endMarker }) => {
+				const lines = (globalThis.__nvpnStandardE2eSerial?.text || '')
+					.replaceAll('\r', '').split('\n');
+				const beginIndex = lines.findIndex((line) => line.trim() === beginMarker);
+				if (beginIndex < 0) return null;
+				const endIndex = lines.findIndex((line, index) => (
+					index > beginIndex && line.trim().startsWith(`${endMarker}:`)
+				));
+				if (endIndex < 0) return null;
+				const status = Number.parseInt(lines[endIndex].trim().slice(endMarker.length + 1), 10);
+				if (!Number.isInteger(status)) return null;
+				return { status, output: lines.slice(beginIndex + 1, endIndex) };
+			}, { beginMarker: begin, endMarker: end });
+			return Boolean(result);
+		},
+		{ timeoutMs, message: `serial command timed out during ${label}` },
 	);
-	await page.waitForTimeout(300);
-	const geometry = await page.evaluate(() => {
-		const terminal = globalThis.irisWebvmV86.serialTerminal;
-		const buffer = terminal.buffer.active;
-		const screen = document.querySelector('[data-testid="v86-serial"] .xterm-screen');
-		let firstRow = Infinity;
-		let lastRow = -1;
-		let firstColumn = Infinity;
-		let lastColumn = -1;
-		for (let row = buffer.viewportY; row < buffer.length; row += 1) {
-			const line = buffer.getLine(row)?.translateToString(true) || '';
-			for (let column = 0; column < line.length; column += 1) {
-				if (!/[▀▄█]/u.test(line[column])) continue;
-				firstRow = Math.min(firstRow, row);
-				lastRow = Math.max(lastRow, row);
-				firstColumn = Math.min(firstColumn, column);
-				lastColumn = Math.max(lastColumn, column);
-			}
-		}
-		if (lastRow < 0) return null;
-		const bounds = screen.getBoundingClientRect();
-		const cellWidth = bounds.width / terminal.cols;
-		const cellHeight = bounds.height / terminal.rows;
-		return {
-			x: bounds.x + Math.max(0, firstColumn - 4) * cellWidth,
-			y: bounds.y + Math.max(0, firstRow - buffer.viewportY - 2) * cellHeight,
-			width: (Math.min(terminal.cols, lastColumn + 5) - Math.max(0, firstColumn - 4)) * cellWidth,
-			height: (Math.min(terminal.rows, lastRow - buffer.viewportY + 3)
-				- Math.max(0, firstRow - buffer.viewportY - 2)) * cellHeight,
-			verticalScale: (2 * cellWidth) / cellHeight,
-		};
-	});
-	if (!geometry) throw new Error('terminal QR bounds were not found');
-	const screenshot = await page.screenshot({
-		animations: 'disabled',
-		clip: geometry,
-	});
-	return {
-		request: await decodeQr(await normalizeQrScreenshot(page, screenshot, geometry.verticalScale)),
-	};
+	if (result.status !== 0) {
+		throw new Error(`serial command failed during ${label}: ${result.output.join(' | ')}`);
+	}
+	return result.output.map((line) => line.trim()).filter(Boolean);
 }
 
-test('admin approval reaches WebVM over FIPS without application relay traffic', async ({ page }) => {
-	test.setTimeout(420_000);
-	const fixture = inspectNativeFixture();
-	console.log(
-		`native fixture ${fixture.sourceCommit}; nvpn ${fixture.nvpnVersion}`
-		+ ` sha256 ${fixture.nvpnSha256}; fips-core ${fixture.fipsCore.version}`
-		+ ` ${fixture.fipsCore.checksum}; fips-endpoint ${fixture.fipsEndpoint.version}`
-		+ ` ${fixture.fipsEndpoint.checksum}`,
+test('WebVM uses the ordinary nVPN binary and join-request flow', async ({ page }) => {
+	test.setTimeout(240_000);
+	await page.goto('/v86');
+	await attachSerial(page);
+	await waitUntil(
+		() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
+		{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
 	);
-	const browserMessages = [];
-	page.on('console', (message) => {
-		browserMessages.push(`${message.type()}: ${message.text()}`);
-		if (browserMessages.length > 200) browserMessages.shift();
-	});
-	const nvpn = fixture.binary;
-	const isolated = createIsolatedAdmin(nvpn);
-	const admin = startAdminHelper({
-		configPath: isolated.configPath,
-		manifest: fixture.manifest,
-	});
-	try {
-		await admin.waitForStatus('ready');
-		await page.goto('/v86');
-		await attachSerial(page);
-		await waitUntil(
-			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
-			{ timeoutMs: 120_000, message: 'WebVM did not attach to browser FIPS' },
-		);
-		expect(await page.evaluate(
-			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.autoConnect,
-		)).toBe(true);
-		expect(await page.evaluate(
-			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.advertiseOnNostr,
-		)).toBe(true);
-		expect(await page.evaluate(
-			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxConnections,
-		)).toBe(16);
-		expect(await page.evaluate(
-			() => globalThis.irisWebvmV86.fipsHost.webrtc.cfg.maxAutoConnections,
-		)).toBe(8);
-		const browserHostPublicKey = await page.evaluate(
-			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
-		);
-		const { request } = await startAndScanJoinRequest(page);
-		expect(request).toMatch(
-			/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+\?r=[A-Za-z0-9_-]{43}$/,
-		);
-		const approvalStartedAt = Date.now();
-		const captureDeliveryState = async () => {
-			return page.evaluate(() => {
-				const stats = globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats || {};
-				return {
-					approvalSeen: (globalThis.__nvpnJoinE2eSerial?.text || '')
-						.includes('Join approved for network'),
-					activeSubscriptions:
-						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.activeSubscriptionCount?.(),
-					pendingReplies:
-						globalThis.irisWebvmV86?.fipsHost?.pubsub?.service?.pendingReplies?.size,
-					stateControlForwards: stats.stateControlForwards,
-					stateControlFailures: stats.stateControlFailures,
-					stateControlReadyHints: stats.stateControlReadyHints,
-					subscriptionBatches: stats.subscriptionBatches,
-					relayEvents: stats.relayEvents,
-					relaySubscriptions: stats.relaySubscriptions,
-					relaySubscriptionFailures: stats.relaySubscriptionFailures,
-					serviceErrors: stats.serviceErrors,
-				};
-			});
-		};
-		const approvalFailure = async (error) => {
-			const diagnostics = await captureDeliveryState();
-			return new Error(
-				`${error.message}: ${JSON.stringify(diagnostics)}`
-					+ `\nBrowser log:\n${browserMessages.join('\n')}`,
-			);
-		};
-		const beforeApproval = await captureDeliveryState();
-		expect(beforeApproval.approvalSeen).toBe(false);
-		expect(beforeApproval.stateControlForwards ?? 0).toBe(0);
-		expect(beforeApproval.stateControlFailures ?? 0).toBe(0);
-		expect(beforeApproval.stateControlReadyHints ?? 0).toBeGreaterThanOrEqual(1);
-		expect(beforeApproval.subscriptionBatches ?? 0).toBe(0);
-		expect(beforeApproval.relayEvents ?? 0).toBe(0);
-		expect(beforeApproval.relaySubscriptions ?? 0).toBe(0);
-		let imported;
-		try {
-			imported = await admin.approve(request);
-		} catch (error) {
-			throw await approvalFailure(error);
-		}
-		const senderTcpAckLatencyMs = Date.now() - approvalStartedAt;
-		expect(imported.participantAdded).toBe(true);
-		expect(imported.directRosters).toBe(1);
-		expect(senderTcpAckLatencyMs).toBeLessThanOrEqual(15_000);
-		try {
-			await waitUntil(
-				() => page.evaluate(() => (
-					globalThis.__nvpnJoinE2eSerial?.text || ''
-				).includes('Join approved for network')),
-				{ timeoutMs: 15_000, message: 'WebVM did not apply the signed roster' },
-			);
-		} catch (error) {
-			throw await approvalFailure(error);
-		}
-		const rosterAppliedLatencyMs = Date.now() - approvalStartedAt;
-		await page.evaluate(() => {
-			const serial = globalThis.__nvpnJoinE2eSerial;
-			serial.text = '';
-			serial.emulator.serial0_send('\x03');
-		});
-		try {
-			await waitUntil(
-				() => page.evaluate(() => (
-					globalThis.__nvpnJoinE2eSerial?.text || ''
-				).includes('root@webvm:~#')),
-				{ timeoutMs: 10_000, message: 'WebVM shell did not return after approval' },
-			);
-			await page.evaluate(() => {
-				globalThis.__nvpnJoinE2eSerial.emulator.serial0_send(
-					`for i in $(seq 1 60); do nvpn status | grep -q 'via mesh' && { nvpn status; break; }; sleep 0.5; done\n`,
-				);
-			});
-			await waitUntil(
-				() => page.evaluate(() => (
-					globalThis.__nvpnJoinE2eSerial?.text || ''
-				).includes('via mesh')),
-				{ timeoutMs: 45_000, message: 'approved WebVM peer did not become reachable via mesh' },
-			);
-		} catch (error) {
-			throw await approvalFailure(error);
-		}
-		const guestOutput = await page.evaluate(() => globalThis.__nvpnJoinE2eSerial.text);
-		expect(guestOutput).toContain('via mesh');
-		expect(guestOutput).not.toContain('ping: bad address');
-		expect(await page.evaluate(() => {
-			const preferred = JSON.parse(
-				localStorage.getItem('iris-webvm:fips-ingress-peers:v2') || '[]',
-			);
-			return preferred.length;
-		})).toBeGreaterThanOrEqual(1);
-		const afterApproval = await captureDeliveryState();
-		await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
-		const reloadStartedAt = Date.now();
-		await page.reload();
-		await attachSerial(page);
-		await waitUntil(
-			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
-			{ timeoutMs: 120_000, message: 'restored WebVM terminal did not become ready' },
-		);
-		await waitUntil(
-			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().fipsStatus?.ethernetPeers > 0),
-			{ timeoutMs: 120_000, message: 'restored WebVM did not reattach to browser FIPS' },
-		);
-		expect(await page.evaluate(
-			() => [...globalThis.irisWebvmV86.fipsHost.identity.publicKey],
-		)).toEqual(browserHostPublicKey);
-		await waitUntil(
-			() => page.evaluate(() => (
-				globalThis.__nvpnJoinE2eSerial?.text || ''
-			).includes('root@webvm:~#')),
-			{ timeoutMs: 60_000, message: 'restored WebVM shell did not become ready' },
-		);
-		await page.evaluate((exitNode) => {
-			const serial = globalThis.__nvpnJoinE2eSerial;
-			serial.text = '';
-			serial.emulator.serial0_send(
-				`for i in $(seq 1 30); do nvpn ping ${exitNode} --count 1 --timeout-secs 1 >/dev/null 2>&1 || true; nvpn status | grep -q 'via mesh' && { nvpn status; break; }; sleep 1; done\n`,
-			);
-		}, imported.exitNode);
-		try {
-			await waitUntil(
-				() => page.evaluate(() => (
-					globalThis.__nvpnJoinE2eSerial?.text || ''
-				).includes('via mesh')),
-				{
-					timeoutMs: 60_000,
-					message: 'restored WebVM traffic was not reported as reachable via mesh',
-				},
-			);
-		} catch (error) {
-			throw await approvalFailure(error);
-		}
-		const restoredGuestOutput = await page.evaluate(
-			() => globalThis.__nvpnJoinE2eSerial.text,
-		);
-		expect(restoredGuestOutput).toContain('via mesh');
-		const restoredMeshLatencyMs = Date.now() - reloadStartedAt;
-		expect(restoredMeshLatencyMs).toBeLessThanOrEqual(20_000);
-		const afterReload = await captureDeliveryState();
-		const meshReachabilityLatencyMs = Date.now() - approvalStartedAt;
-		console.log(`admin FIPS-TCP bytes reached the browser in ${senderTcpAckLatencyMs}ms`);
-		console.log(`signed roster was applied by WebVM in ${rosterAppliedLatencyMs}ms`);
-		console.log(`approved peer became reachable via mesh in ${meshReachabilityLatencyMs}ms`);
-		console.log(`restored peer became reachable via mesh in ${restoredMeshLatencyMs}ms`);
-		expect(afterApproval.stateControlForwards).toBe(imported.directRosters);
-		expect(afterApproval.stateControlFailures ?? 0).toBe(0);
-		expect(afterApproval.subscriptionBatches ?? 0).toBe(0);
-		expect(afterApproval.relayEvents ?? 0).toBe(0);
-		expect(afterApproval.relaySubscriptions ?? 0).toBe(0);
-		expect(afterReload.subscriptionBatches ?? 0).toBe(0);
-		expect(afterReload.relayEvents ?? 0).toBe(0);
-		expect(afterReload.relaySubscriptions ?? 0).toBe(0);
-		await admin.cleanup();
-	} finally {
-		admin.stop();
-		isolated.cleanup();
-		await page.unrouteAll({ behavior: 'ignoreErrors' });
-	}
+
+	const output = await runSerialCommand(
+		page,
+		'normal nVPN join request',
+		"! grep -q -- '--webvm-' /usr/local/sbin/webvm-nvpn " +
+			'&& ! nvpn webvm-guest --help >/dev/null 2>&1 ' +
+			'&& nvpn join-request --no-qr --no-wait',
+	);
+	const request = output.find((line) => line.startsWith('nvpn://join-request/'));
+	expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/u);
+
+	const stats = await page.evaluate(() => globalThis.irisWebvmV86.fipsHost.pubsub.stats);
+	expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
 });

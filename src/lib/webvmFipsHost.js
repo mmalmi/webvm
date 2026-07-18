@@ -1,7 +1,5 @@
 import {
 	FipsNode,
-	deriveNodeAddr,
-	fromHex,
 	nodeAddrToHex,
 	noopLogger,
 	toHex,
@@ -14,10 +12,6 @@ import {
 } from '@fips/transport-webrtc';
 import { createV86EthernetFramePort } from '$lib/v86EthernetFramePort.js';
 import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
-import {
-	loadPreferredWebvmFipsIngresses,
-	rememberWebvmFipsIngress,
-} from '$lib/webvmFipsIngress.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
 export const DEFAULT_FIPS_RELAYS = Object.freeze([
@@ -49,7 +43,6 @@ export async function createWebvmFipsHost({
 	onStatus = () => {},
 } = {}) {
 	const identity = await loadOrCreateWebvmFipsIdentity();
-	const preferredIngresses = loadPreferredWebvmFipsIngresses();
 	const sharedRelayClients = relayClients || relays.map((url) => new NostrRelayClient({
 		url,
 		logger,
@@ -80,7 +73,6 @@ export async function createWebvmFipsHost({
 		acceptConnections: true,
 		maxConnections: 16,
 		maxAutoConnections: 8,
-		preferredAutoConnectPeers: preferredIngresses,
 		connectTimeoutMs: 12_000,
 		iceGatherTimeoutMs: 2_000,
 		mtu: WEBVM_FIPS_UNDERLAY_MTU,
@@ -95,28 +87,10 @@ export async function createWebvmFipsHost({
 		logger,
 	});
 	const localEthernetPeers = new Set();
-	const hintedIngressConnects = new Map();
-	const connectHintedIngress = (xOnlyPubkey) => {
-		if (hintedIngressConnects.has(xOnlyPubkey)) return;
-		const pending = (async () => {
-			const hinted = await webrtc.resolve(deriveNodeAddr(fromHex(`02${xOnlyPubkey}`)));
-			if (!hinted) return;
-			await node.connect(hinted.remoteAddr);
-			rememberWebvmFipsIngress(hinted.remoteAddr.addr);
-		})().catch((error) => {
-			logger.debug('WebVM mesh ingress hint did not connect', xOnlyPubkey, error);
-		}).finally(() => {
-			hintedIngressConnects.delete(xOnlyPubkey);
-		});
-		hintedIngressConnects.set(xOnlyPubkey, pending);
-	};
 	const pubsub = createWebvmNostrPubsubService({
 		node,
 		relayClients: sharedRelayClients,
 		authorizePeer: (peer) => localEthernetPeers.has(peer),
-		localPeers: () => [...localEthernetPeers],
-		onStateControlPeer: rememberWebvmFipsIngress,
-		onMeshIngressHint: connectHintedIngress,
 		logger,
 	});
 	const webrtcPeerKeys = new Set();
