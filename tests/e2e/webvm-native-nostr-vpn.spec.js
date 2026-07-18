@@ -156,13 +156,13 @@ test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async (
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
 			{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
 		);
-		await waitUntil(
-			() => page.evaluate(() => (
-				globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats?.subscriptionBatches || 0
-			) > 0),
-			{ timeoutMs: 120_000, message: 'ordinary nVPN daemon did not open the FIPS pubsub uplink' },
+		await runSerialCommand(
+			page,
+			'ordinary nVPN daemon startup',
+			"for i in $(seq 1 120); do rc-service webvm-nvpn status >/dev/null 2>&1 && exit 0; " +
+				"sleep 1; done; rc-service webvm-nvpn status; cat /var/log/webvm-nvpn.log; exit 1",
+			130_000,
 		);
-
 		const output = await runSerialCommand(
 			page,
 			'normal nVPN join request',
@@ -174,6 +174,29 @@ test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async (
 		);
 		const request = output.find((line) => line.startsWith('nvpn://join-request/'));
 		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/u);
+		try {
+			await waitUntil(
+				() => page.evaluate(() => (
+					globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats?.subscriptionBatches || 0
+				) > 0),
+				{ timeoutMs: 30_000, message: 'ordinary nVPN daemon did not open the FIPS pubsub uplink' },
+			);
+		} catch (error) {
+			const guest = await runSerialCommand(
+				page,
+				'nVPN uplink diagnostics',
+				"rc-service webvm-nvpn status || true; echo __LOG__; " +
+					"cat /var/log/webvm-nvpn.log 2>&1 || true; echo __LINKS__; ip link; " +
+					"echo __SCOPE__; cat /run/webvm/fips-discovery-scope 2>&1 || true; " +
+					"echo __PROCESSES__; ps; true",
+				30_000,
+			);
+			const browser = await page.evaluate(() => ({
+				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
+				state: globalThis.irisWebvmV86?.state?.(),
+			}));
+			throw new Error(`${error.message}\nGuest:\n${guest.join('\n')}\nBrowser:\n${JSON.stringify(browser)}`);
+		}
 
 		const approvalEvents = await runStandardApproval({ fixture, request, dataDir });
 		expect(approvalEvents).toEqual(expect.arrayContaining([
