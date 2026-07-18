@@ -11,6 +11,7 @@ import {
 	WebRtcTransport,
 } from '@fips/transport-webrtc';
 import { createV86EthernetFramePort } from '$lib/v86EthernetFramePort.js';
+import { createOptionalFipsTransport } from '$lib/optionalFipsTransport.js';
 import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
@@ -47,6 +48,7 @@ export async function createWebvmFipsHost({
 		url,
 		logger,
 	}));
+	const carrierErrors = [];
 	const framePort = createV86EthernetFramePort(emulator);
 	const ethernet = new VirtualEthernetTransport({
 		port: framePort,
@@ -80,7 +82,15 @@ export async function createWebvmFipsHost({
 	});
 	const node = new FipsNode({
 		identity,
-		transports: [ethernet, webrtc],
+		transports: [
+			ethernet,
+			createOptionalFipsTransport(webrtc, {
+				logger,
+				onUnavailable: ({ type, error }) => {
+					carrierErrors.push({ type, error: error?.message || String(error) });
+				},
+			}),
+		],
 		forwarding: true,
 		routingMode: 'reply_learned',
 		heartbeatIntervalMs: 1_000,
@@ -99,7 +109,7 @@ export async function createWebvmFipsHost({
 	let lastPeerError = '';
 	let lastPeerErrorWhere = '';
 	const publishStatus = (state = 'ready', error = '') => {
-		onStatus({
+			onStatus({
 			state,
 			error,
 			lastPeerError,
@@ -108,6 +118,7 @@ export async function createWebvmFipsHost({
 			nodeAddrHex: nodeAddrToHex(identity.nodeAddr),
 			ethernetPeers,
 			webrtcPeers,
+			carrierErrors: [...carrierErrors],
 		});
 	};
 	const removePeerListener = node.on('peer', (event) => {
