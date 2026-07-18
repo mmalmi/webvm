@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -208,7 +208,32 @@ test('ordinary nVPN pairing crosses the generic Ethernet pubsub uplink', async (
 			);
 		}
 
-		const approvalEvents = await runStandardApproval({ fixture, request, dataDir });
+		let approvalEvents;
+		try {
+			approvalEvents = await runStandardApproval({ fixture, request, dataDir });
+		} catch (error) {
+			const guest = await runSerialCommand(
+				page,
+				'nVPN approval diagnostics',
+				"cat /var/lib/nvpn/daemon.state.json 2>&1 || true; echo __LOG__; " +
+					"cat /var/lib/nvpn/daemon.log 2>&1 || true",
+				30_000,
+			);
+			const browser = await page.evaluate(() => ({
+				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
+				state: globalThis.irisWebvmV86?.state?.(),
+			}));
+			let adminConfig = '';
+			try {
+				adminConfig = readFileSync(path.join(dataDir, 'config.toml'), 'utf8');
+			} catch (readError) {
+				adminConfig = `unavailable: ${readError.message}`;
+			}
+			throw new Error(
+				`${error.message}\nAdmin config:\n${adminConfig}\nGuest:\n${guest.join('\n')}` +
+					`\nBrowser:\n${JSON.stringify(browser)}`,
+			);
+		}
 		expect(approvalEvents).toEqual(expect.arrayContaining([
 			expect.objectContaining({ ok: true, event: 'approved', queueDepth: 1 }),
 			expect.objectContaining({ ok: true, event: 'delivered', queueDrained: true }),
