@@ -12,6 +12,7 @@ export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
+nvpn set --config "$config" --fips-host-tunnel-enabled true >/dev/null
 
 exec nvpn daemon \
     --service \
