@@ -214,7 +214,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	));
 	expect(resumeCommand).toContain("hostname webvm; export PS1='root@webvm:\\w# '");
 	expect(resumeCommand).toContain(
-		"sh -c '(export NVPN_FIPS_NOSTR_DISCOVERY_POLICY=open; rc-service webvm-nvpn start) >/dev/null 2>&1 &'",
+		"sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'",
 	);
 	expect(resumeCommand).not.toContain('/etc/resolv.conf');
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'");
@@ -235,10 +235,8 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	expect(resumeCommand.indexOf('webvm-seed-rng')).toBeLessThan(
 		resumeCommand.indexOf('date -u -s'),
 	);
+	expect(resumeCommand).not.toContain('NVPN_FIPS_NOSTR_DISCOVERY_POLICY');
 	expect(resumeCommand.indexOf('date -u -s')).toBeLessThan(
-		resumeCommand.indexOf('NVPN_FIPS_NOSTR_DISCOVERY_POLICY=open'),
-	);
-	expect(resumeCommand.indexOf('NVPN_FIPS_NOSTR_DISCOVERY_POLICY=open')).toBeLessThan(
 		resumeCommand.indexOf('rc-service webvm-nvpn start'),
 	);
 	expect(resumeCommand.indexOf('rc-service webvm-nvpn start')).toBeLessThan(

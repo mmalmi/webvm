@@ -7,6 +7,8 @@ runtime_dir=${WEBVM_RUNTIME_DIR:-/run/webvm}
 ethernet_interface=${WEBVM_FIPS_INTERFACE:-eth0}
 discovery_scope=${WEBVM_FIPS_DISCOVERY_SCOPE:-fips-overlay-v1}
 tun_interface=${NVPN_WEBVM_TUN_INTERFACE:-nvpn0}
+NVPN_FIPS_NOSTR_DISCOVERY_POLICY=${NVPN_FIPS_NOSTR_DISCOVERY_POLICY:-open}
+export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
