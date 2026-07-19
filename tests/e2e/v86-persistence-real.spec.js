@@ -108,6 +108,7 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 		'__NVPN_STATE_WRITTEN__',
 	);
 	await runCommand(page, 'echo user-history-survives-refresh', '__USER_HISTORY_WRITTEN__');
+	await runCommand(page, 'history -w', '__USER_HISTORY_FLUSHED__');
 	await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
 	await expect.poll(() => savedDiskExists(page), { timeout: 15_000 }).toBe(true);
 
