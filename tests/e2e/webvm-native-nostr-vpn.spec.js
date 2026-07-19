@@ -212,6 +212,17 @@ test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink',
 					`\nBrowser:\n${JSON.stringify(browser)}`,
 			);
 		}
+		await waitUntil(
+			() => page.evaluate((expectedWebsocketPeers) => {
+				const status = globalThis.irisWebvmV86?.state?.().fipsStatus;
+				return status?.websocketPeers === expectedWebsocketPeers
+					&& (status?.ethernetPeers || 0) > 0;
+			}, DEFAULT_FIPS_WEBSOCKET_SEED_URLS.length),
+			{
+				timeoutMs: 30_000,
+				message: 'ordinary nVPN approval topology did not become ready',
+			},
+		);
 
 		let approvalEvents;
 		try {
