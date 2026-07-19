@@ -87,6 +87,11 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk');
 
 	const terminal = page.getByTestId('v86-serial');
+	await runCommand(
+		page,
+		"for i in $(seq 1 30); do test -s /run/webvm/nvpn.pid && tr '\\0' '\\n' </proc/$(cat /run/webvm/nvpn.pid)/environ | grep -qx 'NVPN_FIPS_NOSTR_DISCOVERY_POLICY=open' && break; sleep 1; done; tr '\\0' '\\n' </proc/$(cat /run/webvm/nvpn.pid)/environ | grep -qx 'NVPN_FIPS_NOSTR_DISCOVERY_POLICY=open'",
+		'__NVPN_FIPS_TRANSIT_POLICY_READY__',
+	);
 	await terminal.click();
 	await page.keyboard.press('ArrowUp');
 	await expect.poll(() => terminalText(page)).not.toContain('rc-service webvm-nvpn start');
