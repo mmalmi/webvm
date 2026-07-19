@@ -196,7 +196,8 @@ ${WELCOME_BORDER}
 				`date -u -s '@${Math.floor(Date.now() / 1_000)}' >/dev/null; ` +
 				`hostname webvm; export PS1='root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
-					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
+					`sh -c '(export NVPN_FIPS_NOSTR_DISCOVERY_POLICY=open; ` +
+						`rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
 				`{ grep -v '__IRIS_WEBVM_' /root/.ash_history 2>/dev/null || true; } ` +
 				`> /root/.ash_history.iris-resume; history -c 2>/dev/null; ` +
