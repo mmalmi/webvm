@@ -6,6 +6,8 @@
 
 - Upgrade the vendored browser transports to FIPS TypeScript 0.0.29 for
   direct FSP negotiation with legacy FMP fallback.
+- Rebuild the 32-bit guest with nVPN 4.0.99 and native FIPS 0.4.20, and
+  regenerate its verified preinitialized VM state.
 - Replace the datagram-era WebVM Nostr bridge with `nostr-pubsub` 0.5.1's
   reliable FIPS-TCP client and transport-neutral relay/FIPS router.
 
