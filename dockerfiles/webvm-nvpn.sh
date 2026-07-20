@@ -11,6 +11,15 @@ tun_interface=${NVPN_WEBVM_TUN_INTERFACE:-nvpn0}
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
 
+# WebVM starts unpaired but still promises direct .fips reachability. Opt in
+# before the daemon reads its config so the TUN and secure resolver exist for
+# the first guest command, while the browser-side Ethernet peer remains usable.
+nvpn set \
+    --config "$config" \
+    --fips-host-tunnel-enabled true \
+    --connect-to-non-roster-fips-peers true \
+    >/dev/null
+
 exec nvpn daemon \
     --service \
     --config "$config" \

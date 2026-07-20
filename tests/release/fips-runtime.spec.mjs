@@ -31,3 +31,13 @@ test('browser FIPS contains no Nostr packet transport or companion carrier', () 
 	for (const term of forbidden) assert.doesNotMatch(productionSources, new RegExp(term, 'u'));
 	assert.match(productionSources, /createWebvmNostrPubsubService/u);
 });
+
+test('guest enables the unpaired FIPS tunnel before starting nVPN', () => {
+	const startup = readFileSync('dockerfiles/webvm-nvpn.sh', 'utf8');
+	const optIn = 'nvpn set --config "$config"';
+	const daemon = 'exec nvpn daemon';
+
+	assert.match(startup, /--fips-host-tunnel-enabled true/u);
+	assert.match(startup, /--connect-to-non-roster-fips-peers true/u);
+	assert.ok(startup.indexOf(optIn) < startup.indexOf(daemon));
+});
