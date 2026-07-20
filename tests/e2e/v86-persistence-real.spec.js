@@ -24,7 +24,9 @@ async function runCommand(page, command, marker) {
 	await terminal.click();
 	await page.keyboard.insertText(`${command}; printf '${marker}\\n'`);
 	await page.keyboard.press('Enter');
-	await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain(marker);
+	// Commands may intentionally contain a 30-second guest-side readiness loop;
+	// leave enough host-side margin for v86 scheduling and terminal rendering.
+	await expect.poll(() => terminalText(page), { timeout: 60_000 }).toContain(marker);
 }
 
 async function savedDiskExists(page) {

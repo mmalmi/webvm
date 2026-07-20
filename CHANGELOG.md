@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.0.4 - 2026-07-20
+
+- Upgrade the vendored browser transports to FIPS TypeScript 0.0.29 for
+  direct FSP negotiation with legacy FMP fallback.
 - Replace the datagram-era WebVM Nostr bridge with `nostr-pubsub` 0.5.1's
   reliable FIPS-TCP client and transport-neutral relay/FIPS router.
 
