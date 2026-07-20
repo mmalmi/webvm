@@ -4,6 +4,8 @@ set -eu
 runtime_dir=${WEBVM_RUNTIME_DIR:-/run/webvm}
 
 modprobe tun
+modprobe crc32c_generic
+modprobe nf_tables
 mkdir -p /dev/net "$runtime_dir"
 if [ ! -c /dev/net/tun ]; then
     rm -f /dev/net/tun

@@ -20,6 +20,7 @@ RUN apk add --no-cache \
     iptables \
     linux-firmware-none \
     linux-virt \
+    nftables \
     openrc
 
 COPY nvpn /usr/local/bin/nvpn
@@ -73,6 +74,11 @@ RUN chmod 0755 \
       ! -path '*/drivers/net/tun.ko*' \
       ! -path '*/drivers/net/macvlan.ko*' \
       ! -path '*/net/packet/af_packet.ko*' \
+      ! -path '*/net/netfilter/*' \
+      ! -path '*/net/ipv4/netfilter/*' \
+      ! -path '*/net/ipv6/netfilter/*' \
+      ! -path '*/lib/libcrc32c.ko*' \
+      ! -path '*/crypto/crc32c_generic.ko*' \
       -delete && \
     find "/lib/modules/$kernel_release/kernel" -depth -type d -empty -delete && \
     depmod -a "$kernel_release" && \

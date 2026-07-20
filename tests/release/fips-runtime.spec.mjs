@@ -57,3 +57,16 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 			< launcher.indexOf('exec nvpn daemon'),
 	);
 });
+
+test('WebVM guest retains the Linux firewall required by the FIPS host tunnel', () => {
+	const guest = readFileSync('dockerfiles/v86_guest', 'utf8');
+	const tunnelSetup = readFileSync('dockerfiles/webvm-tun.sh', 'utf8');
+	assert.match(guest, /^    nftables \\\s*$/mu);
+	assert.match(guest, /! -path '\*\/net\/netfilter\/\*'/u);
+	assert.match(guest, /! -path '\*\/net\/ipv4\/netfilter\/\*'/u);
+	assert.match(guest, /! -path '\*\/net\/ipv6\/netfilter\/\*'/u);
+	assert.match(guest, /! -path '\*\/lib\/libcrc32c\.ko\*'/u);
+	assert.match(guest, /! -path '\*\/crypto\/crc32c_generic\.ko\*'/u);
+	assert.match(tunnelSetup, /^modprobe crc32c_generic$/mu);
+	assert.match(tunnelSetup, /^modprobe nf_tables$/mu);
+});
