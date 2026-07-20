@@ -197,7 +197,9 @@ ${WELCOME_BORDER}
 				`hostname webvm; export PS1='$(history -w 2>/dev/null)root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
-					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; `) +
+					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; ` +
+					`for attempt in $(seq 1 30); do ` +
+					`if ss -lun | grep -q '127.0.0.1:53'; then break; fi; sleep 1; done; `) +
 				`{ grep -v '__IRIS_WEBVM_' /root/.ash_history 2>/dev/null || true; } ` +
 				`> /root/.ash_history.iris-resume; history -c 2>/dev/null; ` +
 				`mv /root/.ash_history.iris-resume /root/.ash_history; ` +

@@ -218,6 +218,9 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 	expect(resumeCommand).toContain(
 		"sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'",
 	);
+	expect(resumeCommand).toContain(
+		"for attempt in $(seq 1 30); do if ss -lun | grep -q '127.0.0.1:53'; then break; fi; sleep 1; done;",
+	);
 	expect(resumeCommand).not.toContain('/etc/resolv.conf');
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'");
 	expect(resumeCommand).toContain(

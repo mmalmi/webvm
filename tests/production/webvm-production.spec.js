@@ -119,10 +119,12 @@ test('five fresh WebVMs deliver their first FIPS ping without resolver or sessio
 			const rows = terminal.locator('.xterm-rows');
 			await expect(rows).toContainText('root@webvm:~#');
 
-			const marker = `__WEBVM_FRESH_FIRST_PING_${attempt}_OK__`;
+			const markerPrefix = `__WEBVM_FRESH_FIRST_PING_${attempt}_`;
+			const marker = `${markerPrefix}OK__`;
 			await terminal.click();
 			await page.keyboard.insertText(
-				`ping -c 1 -W 8 ${LNVPS_FIPS_NAME} >/dev/null && printf '${marker}\\n'`,
+				`a='${markerPrefix}'; b='OK__'; ` +
+				`ping -c 1 -W 8 ${LNVPS_FIPS_NAME} >/dev/null && printf '%s%s\\n' \"$a\" \"$b\"`,
 			);
 			await page.keyboard.press('Enter');
 			await expect(rows).toContainText(marker, { timeout: 30_000 });
