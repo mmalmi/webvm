@@ -12,6 +12,9 @@ export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
+
+# Start unpaired with direct .fips reachability before the daemon reads the
+# config, while browser-side Ethernet remains available for discovery.
 nvpn set \
     --config "$config" \
     --fips-host-tunnel-enabled true \
