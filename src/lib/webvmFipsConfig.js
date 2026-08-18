@@ -19,3 +19,4 @@ export const WEBVM_NOSTR_PUBSUB_FILTERS = Object.freeze([
 ]);
 
 export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
+export const WEBVM_FIPS_ETHERNET_MTU = 1280;

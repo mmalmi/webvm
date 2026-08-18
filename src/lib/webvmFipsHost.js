@@ -17,16 +17,21 @@ import {
 	DEFAULT_FIPS_RELAYS,
 	DEFAULT_FIPS_STUN_SERVERS,
 	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
+	WEBVM_FIPS_ETHERNET_MTU,
 	WEBVM_FIPS_UNDERLAY_MTU,
 	WEBVM_NOSTR_PUBSUB_FILTERS,
 } from '$lib/webvmFipsConfig.js';
 import { loadOrCreateWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 import { createWebvmNostrPubsubService } from '$lib/webvmNostrPubsubService.js';
 
+const ETHERNET_SESSION_STALE_MS = 45_000;
+const ETHERNET_SESSION_WATCH_INTERVAL_MS = 5_000;
+
 export {
 	DEFAULT_FIPS_RELAYS,
 	DEFAULT_FIPS_STUN_SERVERS,
 	DEFAULT_FIPS_WEBSOCKET_SEED_URLS,
+	WEBVM_FIPS_ETHERNET_MTU,
 	WEBVM_FIPS_UNDERLAY_MTU,
 	WEBVM_NOSTR_PUBSUB_FILTERS,
 } from '$lib/webvmFipsConfig.js';
@@ -58,8 +63,8 @@ export async function createWebvmFipsHost({
 	const ethernet = new VirtualEthernetTransport({
 		port: framePort,
 		localMac: macForIdentity(identity),
-		mtu: WEBVM_FIPS_UNDERLAY_MTU,
-		discovery: false,
+		mtu: WEBVM_FIPS_ETHERNET_MTU,
+		discovery: true,
 		announce: true,
 		discoveryScope: discoveryApp,
 		beaconIntervalMs: 10_000,
@@ -108,6 +113,7 @@ export async function createWebvmFipsHost({
 		logger,
 	});
 	const localEthernetPeers = new Set();
+	const localEthernetPeerAddresses = new Map();
 	const pubsub = await createWebvmNostrPubsubService({
 		node,
 		localPeerId: toHex(identity.publicKey),
@@ -145,8 +151,13 @@ export async function createWebvmFipsHost({
 		if (event?.remoteAddr?.transport === 'ethernet') {
 			if (connected) {
 				localEthernetPeers.add(peer);
+				localEthernetPeerAddresses.set(peer, {
+					address: event.remoteAddr,
+					connectedAt: Date.now(),
+				});
 			} else {
 				localEthernetPeers.delete(peer);
+				localEthernetPeerAddresses.delete(peer);
 			}
 			pubsub.refreshPeers();
 		}
@@ -167,6 +178,16 @@ export async function createWebvmFipsHost({
 		websocketPeers = websocketPeerKeys.size;
 		publishStatus();
 	});
+	const ethernetSessionWatch = setInterval(() => {
+		const now = Date.now();
+		for (const { address, connectedAt } of localEthernetPeerAddresses.values()) {
+			const lastGuestData = framePort.stats.lastGuestFipsDataAtByMac[address.addr] || connectedAt;
+			if (now - lastGuestData <= ETHERNET_SESSION_STALE_MS) continue;
+			void ethernet.close(address).catch((error) => {
+				logger.warn('failed to recycle stale WebVM Ethernet session', error);
+			});
+		}
+	}, ETHERNET_SESSION_WATCH_INTERVAL_MS);
 	const removeErrorListener = node.on('error', (event) => {
 		lastPeerError = event?.err instanceof Error
 			? event.err.message
@@ -180,6 +201,7 @@ export async function createWebvmFipsHost({
 		await node.start();
 		publishStatus();
 	} catch (error) {
+		clearInterval(ethernetSessionWatch);
 		removePeerListener?.();
 		removeErrorListener?.();
 		await pubsub.stop();
@@ -197,6 +219,7 @@ export async function createWebvmFipsHost({
 		pubsub,
 		ethernetFrameStats: framePort.stats,
 		async stop() {
+			clearInterval(ethernetSessionWatch);
 			removePeerListener?.();
 			removeErrorListener?.();
 			await pubsub.stop();

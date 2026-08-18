@@ -31,13 +31,15 @@ export function createV86EthernetFramePort(emulator, { id = 0 } = {}) {
 		guestFrames: 0,
 		guestFipsFrames: 0,
 		guestFmpMsg1ByMac: {},
+		lastGuestFipsDataAtByMac: {},
 	};
 	const trackGuestFrame = (frame) => {
 		stats.guestFrames += 1;
 		if (frame.length < 18 || frame[12] !== 0x21 || frame[13] !== 0x21) return;
 		stats.guestFipsFrames += 1;
-		if (frame[14] !== 0x00 || frame[17] !== 0x01) return;
 		const sourceMac = macString(frame, 6);
+		if (frame[14] === 0x00) stats.lastGuestFipsDataAtByMac[sourceMac] = Date.now();
+		if (frame[14] !== 0x00 || frame[17] !== 0x01) return;
 		stats.guestFmpMsg1ByMac[sourceMac] = (stats.guestFmpMsg1ByMac[sourceMac] || 0) + 1;
 	};
 

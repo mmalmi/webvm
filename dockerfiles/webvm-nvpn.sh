@@ -13,6 +13,11 @@ export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
 
+# Native FIPS subtracts the 3-byte Ethernet record header from this interface
+# MTU. Keep its advertised path at the 1,280-byte browser underlay boundary so
+# reliable state-control records are segmented before crossing WebRTC or WSS.
+ip link set dev "$ethernet_interface" mtu 1283
+
 # Start unpaired with direct .fips reachability before the daemon reads the
 # config, while browser-side Ethernet remains available for discovery.
 nvpn set \

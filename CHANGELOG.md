@@ -5,9 +5,17 @@
 ## 2.0.5 - 2026-08-18
 
 - Upgrade the 32-bit guest to nVPN 4.1.7 and native FIPS 0.4.59.
+- Upgrade the browser to FIPS TypeScript runtime 0.0.31, including its
+  simultaneous WebRTC session-glare fix.
 - Exercise ordinary signed-roster pairing against a real private FIPS exit and
   require automatic exit selection, a non-WireGuard default route, public DNS,
   ICMP, and HTTPS before deployment.
+- Cap the guest and browser Ethernet hop at a 1,280-byte FIPS payload so large
+  signed rosters are segmented before crossing WebRTC or WebSocket underlays.
+- Discover as well as announce on virtual Ethernet so a restarted guest daemon
+  replaces the browser's stale authenticated session automatically.
+- Recycle a browser-side Ethernet session when the guest's native FIPS
+  heartbeat traffic disappears, allowing asymmetric daemon restarts to heal.
 - Allow the credentialed real-guest test to run unchanged against a deployed
   WebVM URL for production acceptance.
 
