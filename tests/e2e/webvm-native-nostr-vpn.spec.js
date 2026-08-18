@@ -13,6 +13,7 @@ import {
 	normalizedPubkey,
 	recipientFromJoinRequest,
 	removeNewOutboxEntries,
+	restartExitUntilGuestRosterApplied,
 	runExitAdmin,
 	snapshotOutbox,
 	stageExitAdminConfig,
@@ -370,19 +371,13 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					config: exitAdmin.config,
 					dataDir,
 				});
-				startExitAdminService();
-				await waitUntil(
-					() => exitAdminStatus(exitAdmin.binary, exitAdmin.config).daemon?.running === true,
-					{ timeoutMs: 60_000, intervalMs: 1_000, message: 'exit admin did not restart' },
-				);
-				await waitUntil(
-					() => guestRosterApplied(page),
-					{
-						timeoutMs: 180_000,
-						intervalMs: 2_000,
-						message: 'live exit did not deliver the signed roster to the WebVM guest',
-					},
-				);
+				await restartExitUntilGuestRosterApplied({
+					isRunning: () => exitAdminStatus(
+						exitAdmin.binary, exitAdmin.config,
+					).daemon?.running === true,
+					isGuestRosterApplied: () => guestRosterApplied(page),
+					waitUntil,
+				});
 				approvalEvents = [{ ok: true, event: 'approved', recipient: joinedRecipient }];
 			} else {
 				approvalEvents = await runStandardApproval({ fixture, request, dataDir });
