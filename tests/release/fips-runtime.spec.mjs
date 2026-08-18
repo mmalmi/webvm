@@ -44,11 +44,9 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 	assert.match(launcher, /export NVPN_FIPS_LINUX_TUN_GRO/u);
 	assert.match(launcher, /NVPN_MESH_TUNNEL_MTU=\$\{NVPN_MESH_TUNNEL_MTU:-1000\}/u);
 	assert.match(launcher, /export NVPN_MESH_TUNNEL_MTU/u);
-	assert.match(
-		launcher,
-		/NVPN_FIPS_HOST_INTERFACE_MTU_FLOOR=\$\{NVPN_FIPS_HOST_INTERFACE_MTU_FLOOR:-1000\}/u,
-	);
-	assert.match(launcher, /export NVPN_FIPS_HOST_INTERFACE_MTU_FLOOR/u);
+	assert.match(launcher, /NVPN_WEBVM_TCP_MSS=\$\{NVPN_WEBVM_TCP_MSS:-960\}/u);
+	assert.match(launcher, /iptables -t mangle -[CA] OUTPUT -o "\$tun_interface"/u);
+	assert.match(launcher, /--tcp-flags SYN,RST SYN -j TCPMSS --set-mss "\$NVPN_WEBVM_TCP_MSS"/u);
 	assert.match(
 		launcher,
 		/--fips-host-tunnel-enabled true/u,

@@ -15,15 +15,27 @@ NVPN_FIPS_LINUX_TUN_GRO=${NVPN_FIPS_LINUX_TUN_GRO:-0}
 # Leave enough headroom for native FIPS, browser FMP, and virtual Ethernet on
 # the return path. Larger TUN packets can cross the exit but stall at WebVM.
 NVPN_MESH_TUNNEL_MTU=${NVPN_MESH_TUNNEL_MTU:-1000}
-# Integrated FIPS host routing normally preserves IPv6's 1280-byte minimum.
-# WebVM's smaller authenticated return path needs the explicit 1000-byte floor.
-NVPN_FIPS_HOST_INTERFACE_MTU_FLOOR=${NVPN_FIPS_HOST_INTERFACE_MTU_FLOOR:-1000}
+NVPN_WEBVM_TCP_MSS=${NVPN_WEBVM_TCP_MSS:-960}
 auto_select_exit=${NVPN_WEBVM_AUTO_SELECT_EXIT:-1}
 auto_select_marker=$state_dir/.webvm-exit-autoselect-complete
 export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 export NVPN_FIPS_LINUX_TUN_GRO
 export NVPN_MESH_TUNNEL_MTU
-export NVPN_FIPS_HOST_INTERFACE_MTU_FLOOR
+
+install_webvm_tcp_mss_clamp() {
+    daemon_pid=$1
+    while kill -0 "$daemon_pid" 2>/dev/null; do
+        if ip link show "$tun_interface" >/dev/null 2>&1; then
+            iptables -t mangle -C OUTPUT -o "$tun_interface" -p tcp \
+                --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$NVPN_WEBVM_TCP_MSS" \
+                >/dev/null 2>&1 || \
+                iptables -t mangle -A OUTPUT -o "$tun_interface" -p tcp \
+                    --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$NVPN_WEBVM_TCP_MSS"
+            return
+        fi
+        sleep 1
+    done
+}
 
 first_offered_private_exit() {
     [ -s "$daemon_state" ] || return 1
@@ -72,6 +84,7 @@ nvpn set \
 if [ "$auto_select_exit" = 1 ] && [ ! -e "$auto_select_marker" ]; then
     auto_select_first_private_exit "$$" &
 fi
+install_webvm_tcp_mss_clamp "$$" &
 
 exec nvpn daemon \
     --service \

@@ -20,6 +20,7 @@ import {
 	startExitAdminService,
 	stopExitAdminService,
 } from './helpers/webvm-exit-admin.js';
+import { waitForGuestNvpnDaemon } from './helpers/webvm-daemon-readiness.js';
 import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
@@ -235,17 +236,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
 			{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
 		);
-		await runSerialCommand(
-			page,
-			'ordinary nVPN daemon startup',
-			"for i in $(seq 1 180); do rc-service webvm-nvpn status >/dev/null 2>&1 " +
-				"&& find /var/lib/nvpn/.nvpn-runtime -type s -name 'join-*.sock' 2>/dev/null " +
-				"| grep -q . && exit 0; sleep 1; done; rc-service webvm-nvpn status || true; " +
-				"echo __STATE__; cat /var/lib/nvpn/daemon.state.json 2>&1 || true; " +
-				"echo __LOG__; cat /var/lib/nvpn/daemon.log 2>&1 || true; " +
-				"echo __SERVICE_LOG__; cat /var/log/webvm-nvpn.log 2>&1 || true; exit 1",
-			190_000,
-		);
+		await waitForGuestNvpnDaemon({ page, runSerialCommand });
 		const output = await runSerialCommand(
 			page,
 			'normal nVPN join request',

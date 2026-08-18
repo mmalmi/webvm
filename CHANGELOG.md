@@ -17,8 +17,9 @@
 - Keep the browser underlay at a 1,280-byte FIPS path budget and let the guest
   NIC carry its full 1,302-byte authenticated frame plus Ethernet record header,
   preventing large signed rosters from being truncated at the WebVM boundary.
-- Keep TCP packets discrete and cap the v86 guest tunnel MTU at 1,000 bytes,
-  preventing oversized return frames from stalling HTTPS and encrypted DNS.
+- Keep TCP packets discrete and advertise a 960-byte TCP MSS from the v86
+  guest, preventing oversized return frames from stalling HTTPS and encrypted
+  DNS while retaining the FIPS host tunnel's required 1,280-byte IPv6 MTU.
 - Discover as well as announce on virtual Ethernet so a restarted guest daemon
   replaces the browser's stale authenticated session automatically.
 - Recycle a browser-side Ethernet session when the guest's native FIPS
