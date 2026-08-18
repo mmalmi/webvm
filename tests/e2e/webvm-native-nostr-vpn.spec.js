@@ -407,6 +407,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				`ready=0; for i in $(seq 1 90); do ` +
 					`grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
 					`&& ip -4 route show 0.0.0.0/0 | grep -q 'dev nvpn0' ` +
+					`&& ip link show nvpn0 | grep -q 'mtu 1000' ` +
 					`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1 ` +
 					`&& { ready=1; break; }; sleep 2; done; ` +
 					`[ "$ready" = 1 ] || { timeout 10 nvpn status || true; ip -4 route; exit 1; }; ` +
@@ -416,10 +417,11 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					`| grep -q '"enabled": false'`,
 				210_000,
 			);
-			await runSerialCommand(
-				page,
-				'public Internet through the private FIPS exit',
-				"fail=0; echo __ROUTE__; ip route get 9.9.9.9; " +
+			try {
+				await runSerialCommand(
+					page,
+					'public Internet through the private FIPS exit',
+					"fail=0; echo __ROUTE__; ip route get 9.9.9.9; " +
 					"echo __TUNNEL__; ip address show dev nvpn0; " +
 					"echo __LISTENERS__; ss -lnup 2>&1 | grep -E '(:53|State)' || true; " +
 					"echo __RESOLVER__; cat /etc/resolv.conf; " +
@@ -431,8 +433,28 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					"echo __IP_HTTPS__; curl --insecure --fail --silent --show-error " +
 					"--connect-timeout 10 --max-time 30 https://1.1.1.1/cdn-cgi/trace || fail=1; " +
 					"echo __LOCAL_DNS__; nslookup example.com 127.0.0.1 || fail=1; exit $fail",
-				240_000,
-			);
+					240_000,
+				);
+			} catch (error) {
+				const guest = await runSerialCommand(
+					page,
+					'private exit diagnostics',
+					"echo __ENV__; tr '\\0' '\\n' </proc/$(cat /var/lib/nvpn/daemon.pid)/environ " +
+						"| grep '^NVPN_FIPS_LINUX_TUN_GRO=' || true; echo __LINKS__; " +
+						"ip -s link show dev eth0; ip -s link show dev nvpn0; echo __LOG__; " +
+						"tail -n 200 /var/lib/nvpn/daemon.log 2>&1 || true; true",
+					30_000,
+				);
+				const browser = await page.evaluate(() => ({
+					frames: globalThis.irisWebvmV86?.fipsHost?.ethernetFrameStats,
+					pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
+					state: globalThis.irisWebvmV86?.state?.(),
+				}));
+				throw new Error(
+					`${error.message}\nGuest:\n${guest.join('\n')}` +
+						`\nBrowser:\n${JSON.stringify(browser)}`,
+				);
+			}
 		}
 
 		const stats = await page.evaluate(() => globalThis.irisWebvmV86.fipsHost.pubsub.stats);

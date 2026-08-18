@@ -12,10 +12,14 @@ NVPN_FIPS_NOSTR_DISCOVERY_POLICY=${NVPN_FIPS_NOSTR_DISCOVERY_POLICY:-open}
 # v86's 32-bit guest TUN accepts vnet headers but does not reliably deliver
 # coalesced TCP GRO frames. Keep native packets discrete at this boundary.
 NVPN_FIPS_LINUX_TUN_GRO=${NVPN_FIPS_LINUX_TUN_GRO:-0}
+# Leave enough headroom for native FIPS, browser FMP, and virtual Ethernet on
+# the return path. Larger TUN packets can cross the exit but stall at WebVM.
+NVPN_MESH_TUNNEL_MTU=${NVPN_MESH_TUNNEL_MTU:-1000}
 auto_select_exit=${NVPN_WEBVM_AUTO_SELECT_EXIT:-1}
 auto_select_marker=$state_dir/.webvm-exit-autoselect-complete
 export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 export NVPN_FIPS_LINUX_TUN_GRO
+export NVPN_MESH_TUNNEL_MTU
 
 first_offered_private_exit() {
     [ -s "$daemon_state" ] || return 1
