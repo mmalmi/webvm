@@ -15,6 +15,7 @@ NVPN_FIPS_LINUX_TUN_GRO=${NVPN_FIPS_LINUX_TUN_GRO:-0}
 # Leave enough headroom for native FIPS, browser FMP, and virtual Ethernet on
 # the return path. Larger TUN packets can cross the exit but stall at WebVM.
 NVPN_MESH_TUNNEL_MTU=${NVPN_MESH_TUNNEL_MTU:-1000}
+NVPN_WEBVM_IPV4_EXIT_MTU=${NVPN_WEBVM_IPV4_EXIT_MTU:-1000}
 NVPN_WEBVM_TCP_MSS=${NVPN_WEBVM_TCP_MSS:-960}
 auto_select_exit=${NVPN_WEBVM_AUTO_SELECT_EXIT:-1}
 auto_select_marker=$state_dir/.webvm-exit-autoselect-complete
@@ -22,7 +23,7 @@ export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 export NVPN_FIPS_LINUX_TUN_GRO
 export NVPN_MESH_TUNNEL_MTU
 
-install_webvm_tcp_mss_clamp() {
+enforce_webvm_exit_packet_budget() {
     daemon_pid=$1
     while kill -0 "$daemon_pid" 2>/dev/null; do
         if ip link show "$tun_interface" >/dev/null 2>&1; then
@@ -31,9 +32,14 @@ install_webvm_tcp_mss_clamp() {
                 >/dev/null 2>&1 || \
                 iptables -t mangle -A OUTPUT -o "$tun_interface" -p tcp \
                     --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$NVPN_WEBVM_TCP_MSS"
-            return
+            if ip -4 route show default dev "$tun_interface" | grep -q . && \
+                ! ip -4 route show default dev "$tun_interface" \
+                    | grep -q "mtu $NVPN_WEBVM_IPV4_EXIT_MTU"; then
+                ip -4 route change default dev "$tun_interface" \
+                    mtu "$NVPN_WEBVM_IPV4_EXIT_MTU"
+            fi
         fi
-        sleep 1
+        sleep 2
     done
 }
 
@@ -84,7 +90,7 @@ nvpn set \
 if [ "$auto_select_exit" = 1 ] && [ ! -e "$auto_select_marker" ]; then
     auto_select_first_private_exit "$$" &
 fi
-install_webvm_tcp_mss_clamp "$$" &
+enforce_webvm_exit_packet_budget "$$" &
 
 exec nvpn daemon \
     --service \

@@ -418,7 +418,9 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					'private exit diagnostics',
 					"echo __ENV__; tr '\\0' '\\n' </proc/$(cat /var/lib/nvpn/daemon.pid)/environ " +
 						"| grep '^NVPN_FIPS_LINUX_TUN_GRO=' || true; echo __LINKS__; " +
-						"ip -s link show dev eth0; ip -s link show dev nvpn0; echo __LOG__; " +
+						"ip -s link show dev eth0; ip -s link show dev nvpn0; echo __ROUTES__; " +
+						"ip -4 route; ip route get 1.1.1.1; echo __MANGLE__; " +
+						"iptables -t mangle -L OUTPUT -n -v 2>&1 || true; echo __LOG__; " +
 						"tail -n 200 /var/lib/nvpn/daemon.log 2>&1 || true; true",
 					30_000,
 				);
