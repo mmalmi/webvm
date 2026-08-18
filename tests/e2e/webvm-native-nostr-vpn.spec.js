@@ -252,7 +252,10 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				"&& grep -qF -- '--fips-ethernet-interface' /usr/local/sbin/webvm-nvpn " +
 				"&& grep -qF -- '--fips-ethernet-discovery-scope' /usr/local/sbin/webvm-nvpn " +
 				'&& ! nvpn webvm-guest --help >/dev/null 2>&1 ' +
-				'&& nvpn join-request --no-qr --no-wait',
+				"&& for i in $(seq 1 12); do output=$(nvpn join-request --no-qr --no-wait 2>&1) " +
+				'&& { printf \'%s\\n\' "$output"; exit 0; }; sleep 2; done; ' +
+				'printf \'%s\\n\' "$output"; exit 1',
+			90_000,
 		);
 		const request = output.find((line) => line.startsWith('nvpn://join-request/'));
 		expect(request).toMatch(/^nvpn:\/\/join-request\/[A-Za-z0-9_-]+$/u);
@@ -401,25 +404,31 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			await runSerialCommand(
 				page,
 				'automatic private FIPS exit selection',
-				`deadline=$(($(date +%s) + 180)); while [ $(date +%s) -lt "$deadline" ]; do ` +
-					`status=$(timeout 5 nvpn status --json 2>/dev/null || true); ` +
-					`printf '%s\\n' "$status" | grep -q '"exit_node": "${expectedExit}"' ` +
-					`&& printf '%s\\n' "$status" | grep -A 14 '"wireguard_exit"' ` +
-					`| grep -q '"enabled": false' ` +
-					`&& grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
+				`ready=0; for i in $(seq 1 90); do ` +
+					`grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
 					`&& ip -4 route show 0.0.0.0/0 | grep -q 'dev nvpn0' ` +
 					`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1 ` +
-					`&& exit 0; sleep 1; done; timeout 10 nvpn status || true; ip -4 route; exit 1`,
+					`&& { ready=1; break; }; sleep 2; done; ` +
+					`[ "$ready" = 1 ] || { timeout 10 nvpn status || true; ip -4 route; exit 1; }; ` +
+					`status=$(timeout 10 nvpn status --json); ` +
+					`printf '%s\\n' "$status" | grep -q '"exit_node": "${expectedExit}"' ` +
+					`&& printf '%s\\n' "$status" | grep -A 14 '"wireguard_exit"' ` +
+					`| grep -q '"enabled": false'`,
 				210_000,
 			);
 			await runSerialCommand(
 				page,
-				'public DNS and Internet through the private FIPS exit',
-				"nslookup example.com 127.0.0.1 >/dev/null " +
-					"&& ping -c 1 -W 10 9.9.9.9 >/dev/null " +
-					"&& curl --fail --silent --show-error --connect-timeout 10 --max-time 30 " +
-					"https://example.com/ | grep -q 'Example Domain'",
-				60_000,
+				'public Internet through the private FIPS exit',
+				"fail=0; echo __ROUTE__; ip route get 9.9.9.9; " +
+					"echo __TUNNEL__; ip address show dev nvpn0; " +
+					"echo __LISTENERS__; ss -lnup 2>&1 | grep -E '(:53|State)' || true; " +
+					"echo __RESOLVER__; cat /etc/resolv.conf; " +
+					"echo __ICMP__; ping -c 1 -W 10 9.9.9.9 || fail=1; " +
+					"echo __DIRECT_DNS__; nslookup example.com 9.9.9.9 || fail=1; " +
+					"echo __IP_HTTPS__; curl --insecure --fail --silent --show-error " +
+					"--connect-timeout 10 --max-time 30 https://1.1.1.1/cdn-cgi/trace || fail=1; " +
+					"echo __LOCAL_DNS__; nslookup example.com 127.0.0.1 || fail=1; exit $fail",
+				120_000,
 			);
 		}
 

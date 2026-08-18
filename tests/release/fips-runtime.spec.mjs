@@ -65,7 +65,8 @@ test('WebVM guest autoselects one offered private exit without overriding later 
 	assert.match(launcher, /NVPN_WEBVM_AUTO_SELECT_EXIT:-1/u);
 	assert.match(launcher, /\.webvm-exit-autoselect-complete/u);
 	assert.match(launcher, /awk -f \/usr\/local\/libexec\/webvm-first-exit\.awk/u);
-	assert.match(launcher, /timeout 5 nvpn status --json/u);
+	assert.match(launcher, /daemon\.state\.json/u);
+	assert.doesNotMatch(launcher, /nvpn status/u);
 	assert.match(launcher, /nvpn set --config "\$config" --exit-node "\$exit_peer"/u);
 	assert.match(launcher, /nvpn reload --config "\$config"/u);
 	assert.doesNotMatch(launcher, /--wireguard-exit-enabled true/u);

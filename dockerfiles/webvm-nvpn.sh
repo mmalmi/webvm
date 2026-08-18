@@ -4,6 +4,7 @@ set -eu
 state_dir=${NVPN_WEBVM_STATE_DIR:-/var/lib/nvpn}
 config=${NVPN_WEBVM_CONFIG:-$state_dir/config.toml}
 runtime_dir=${WEBVM_RUNTIME_DIR:-/run/webvm}
+daemon_state=${NVPN_WEBVM_DAEMON_STATE:-$state_dir/daemon.state.json}
 ethernet_interface=${WEBVM_FIPS_INTERFACE:-eth0}
 discovery_scope=${WEBVM_FIPS_DISCOVERY_SCOPE:-fips-overlay-v1}
 tun_interface=${NVPN_WEBVM_TUN_INTERFACE:-nvpn0}
@@ -13,8 +14,8 @@ auto_select_marker=$state_dir/.webvm-exit-autoselect-complete
 export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 
 first_offered_private_exit() {
-    timeout 5 nvpn status --json --config "$config" 2>/dev/null | \
-        awk -f /usr/local/libexec/webvm-first-exit.awk
+    [ -s "$daemon_state" ] || return 1
+    awk -f /usr/local/libexec/webvm-first-exit.awk "$daemon_state"
 }
 
 auto_select_first_private_exit() {
