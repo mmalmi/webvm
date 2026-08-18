@@ -28,7 +28,6 @@ const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
 const EXIT_ADMIN_EXCLUSIVE = process.env.NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
-
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real nVPN guest e2e');
 test.use({ trace: 'off' });
 
@@ -217,6 +216,25 @@ function runStandardApproval({ fixture, request, dataDir }) {
 	});
 }
 
+async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page }) {
+	const attempts = Number.parseInt(process.env.NVPN_STANDARD_APPROVAL_ATTEMPTS || '3', 10);
+	if (!Number.isInteger(attempts) || attempts < 1)
+		throw new Error('NVPN_STANDARD_APPROVAL_ATTEMPTS must be a positive integer');
+	const approvalEvents = [];
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		approvalEvents.push(...await runStandardApproval({ fixture, request, dataDir }));
+		if (await guestRosterApplied(page, `signed-roster attempt ${attempt}`)) {
+			return approvalEvents;
+		}
+		if (attempt === attempts) {
+			throw new Error(
+				`signed roster was not applied after ${attempts} delivery attempts\n` +
+					approvalEvents.map((event) => JSON.stringify(event)).join('\n'),
+			);
+		}
+	}
+	throw new Error('signed roster approval attempts unexpectedly exhausted');
+}
 test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
 	test.setTimeout(720_000);
 	const browserFipsLogs = [];
@@ -326,24 +344,9 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				stopExitAdminService();
 				exitServiceStopped = true;
 				try {
-					const attempts = Number.parseInt(
-						process.env.NVPN_STANDARD_APPROVAL_ATTEMPTS || '3',
-						10,
-					);
-					if (!Number.isInteger(attempts) || attempts < 1) {
-						throw new Error('NVPN_STANDARD_APPROVAL_ATTEMPTS must be a positive integer');
-					}
-					approvalEvents = [];
-					for (let attempt = 1; attempt <= attempts; attempt += 1) {
-						approvalEvents.push(...await runStandardApproval({ fixture, request, dataDir }));
-						if (await guestRosterApplied(page, `signed-roster attempt ${attempt}`)) break;
-						if (attempt === attempts) {
-							throw new Error(
-								`signed roster was not applied after ${attempts} delivery attempts\n` +
-									approvalEvents.map((event) => JSON.stringify(event)).join('\n'),
-							);
-						}
-					}
+					approvalEvents = await approveAndWaitForGuestRoster({
+						fixture, request, dataDir, page,
+					});
 				} finally {
 					startExitAdminService();
 					exitServiceStopped = false;
@@ -367,7 +370,19 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					config: exitAdmin.config,
 					dataDir,
 				});
-				runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
+				startExitAdminService();
+				await waitUntil(
+					() => exitAdminStatus(exitAdmin.binary, exitAdmin.config).daemon?.running === true,
+					{ timeoutMs: 60_000, intervalMs: 1_000, message: 'exit admin did not restart' },
+				);
+				await waitUntil(
+					() => guestRosterApplied(page),
+					{
+						timeoutMs: 180_000,
+						intervalMs: 2_000,
+						message: 'live exit did not deliver the signed roster to the WebVM guest',
+					},
+				);
 				approvalEvents = [{ ok: true, event: 'approved', recipient: joinedRecipient }];
 			} else {
 				approvalEvents = await runStandardApproval({ fixture, request, dataDir });
