@@ -10,6 +10,8 @@
 - Exercise ordinary signed-roster pairing against a real private FIPS exit and
   require automatic exit selection, a non-WireGuard default route, public DNS,
   ICMP, and HTTPS before deployment.
+- Automatically select the first roster peer that advertises a private IPv4
+  default route on a fresh WebVM, while preserving later user exit choices.
 - Cap the guest and browser Ethernet hop at a 1,280-byte FIPS payload so large
   signed rosters are segmented before crossing WebRTC or WebSocket underlays.
 - Discover as well as announce on virtual Ethernet so a restarted guest daemon
@@ -18,6 +20,8 @@
   heartbeat traffic disappears, allowing asymmetric daemon restarts to heal.
 - Allow the credentialed real-guest test to run unchanged against a deployed
   WebVM URL for production acceptance.
+- Let the macOS acceptance gate temporarily give the ordinary join helper
+  exclusive ownership of the exit-admin identity before restoring the daemon.
 
 ## 2.0.4 - 2026-07-20
 

@@ -8,7 +8,44 @@ ethernet_interface=${WEBVM_FIPS_INTERFACE:-eth0}
 discovery_scope=${WEBVM_FIPS_DISCOVERY_SCOPE:-fips-overlay-v1}
 tun_interface=${NVPN_WEBVM_TUN_INTERFACE:-nvpn0}
 NVPN_FIPS_NOSTR_DISCOVERY_POLICY=${NVPN_FIPS_NOSTR_DISCOVERY_POLICY:-open}
+auto_select_exit=${NVPN_WEBVM_AUTO_SELECT_EXIT:-1}
+auto_select_marker=$state_dir/.webvm-exit-autoselect-complete
 export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
+
+first_offered_private_exit() {
+    timeout 5 nvpn status --json --config "$config" 2>/dev/null | awk '
+        /"participant_pubkey":/ {
+            peer = $0
+            sub(/^.*"participant_pubkey": *"/, "", peer)
+            sub(/".*$/, "", peer)
+        }
+        /"advertised_routes":/ { in_routes = 1 }
+        in_routes && /"0\.0\.0\.0\/0"/ && peer != "" { print peer; exit }
+        in_routes && /]/ { in_routes = 0 }
+    '
+}
+
+auto_select_first_private_exit() {
+    daemon_pid=$1
+    while kill -0 "$daemon_pid" 2>/dev/null; do
+        if [ -e "$auto_select_marker" ]; then
+            return
+        fi
+        if grep -Eq '^internet_source = "(private_vpn|wireguard|paid_automatic|paid_manual)"$' \
+            "$config" 2>/dev/null; then
+            : >"$auto_select_marker"
+            return
+        fi
+        exit_peer=$(first_offered_private_exit || true)
+        if [ -n "$exit_peer" ] && \
+            timeout 5 nvpn set --config "$config" --exit-node "$exit_peer" >/dev/null 2>&1; then
+            timeout 5 nvpn reload --config "$config" >/dev/null 2>&1 || true
+            : >"$auto_select_marker"
+            return
+        fi
+        sleep 2
+    done
+}
 
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
@@ -25,6 +62,10 @@ nvpn set \
     --fips-host-tunnel-enabled true \
     --connect-to-non-roster-fips-peers true \
     >/dev/null
+
+if [ "$auto_select_exit" = 1 ] && [ ! -e "$auto_select_marker" ]; then
+    auto_select_first_private_exit "$$" &
+fi
 
 exec nvpn daemon \
     --service \

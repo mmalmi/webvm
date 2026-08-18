@@ -58,6 +58,18 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 	);
 });
 
+test('WebVM guest autoselects one offered private exit without overriding later choices', () => {
+	const launcher = readFileSync('dockerfiles/webvm-nvpn.sh', 'utf8');
+	assert.match(launcher, /NVPN_WEBVM_AUTO_SELECT_EXIT:-1/u);
+	assert.match(launcher, /\.webvm-exit-autoselect-complete/u);
+	assert.match(launcher, /"advertised_routes":/u);
+	assert.match(launcher, /"0\\\.0\\\.0\\\.0\\\/0"/u);
+	assert.match(launcher, /timeout 5 nvpn status --json/u);
+	assert.match(launcher, /nvpn set --config "\$config" --exit-node "\$exit_peer"/u);
+	assert.match(launcher, /nvpn reload --config "\$config"/u);
+	assert.doesNotMatch(launcher, /--wireguard-exit-enabled true/u);
+});
+
 test('WebVM guest retains the Linux firewall required by the FIPS host tunnel', () => {
 	const guest = readFileSync('dockerfiles/v86_guest', 'utf8');
 	const tunnelSetup = readFileSync('dockerfiles/webvm-tun.sh', 'utf8');

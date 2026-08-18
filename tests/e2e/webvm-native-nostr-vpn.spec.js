@@ -1,25 +1,29 @@
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
-import {
-	copyFileSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	rmdirSync,
-	rmSync,
-	writeFileSync,
-} from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
-import { nip19 } from 'nostr-tools';
 
 import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
 import { DEFAULT_FIPS_WEBSOCKET_SEED_URLS } from '../../src/lib/webvmFipsConfig.js';
+import {
+	exitAdminStatus,
+	normalizedPubkey,
+	recipientFromJoinRequest,
+	removeNewOutboxEntries,
+	runExitAdmin,
+	snapshotOutbox,
+	stageExitAdminConfig,
+	stageLiveExitApproval,
+	startExitAdminService,
+	stopExitAdminService,
+} from './helpers/webvm-exit-admin.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
+const EXIT_ADMIN_EXCLUSIVE = process.env.NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
 
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real nVPN guest e2e');
@@ -95,8 +99,31 @@ async function runSerialCommand(page, label, command, timeoutMs = 60_000) {
 	return result.output.map((line) => line.trim()).filter(Boolean);
 }
 
+async function guestRosterApplied(page, label = 'signed-roster application check') {
+	try {
+		await runSerialCommand(
+			page,
+			label,
+			"! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
+				"&& grep -q '^shared_roster_signed_by = ' /var/lib/nvpn/config.toml",
+			10_000,
+		);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function runStandardApproval({ fixture, request, dataDir }) {
 	return new Promise((resolve, reject) => {
+		const timeoutSeconds = Number.parseInt(
+			process.env.NVPN_STANDARD_APPROVAL_TIMEOUT_SECS || '90',
+			10,
+		);
+		if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
+			reject(new Error('NVPN_STANDARD_APPROVAL_TIMEOUT_SECS must be a positive integer'));
+			return;
+		}
 		const child = spawn(process.env.CARGO || 'cargo', [
 			'run',
 			'--quiet',
@@ -117,7 +144,7 @@ function runStandardApproval({ fixture, request, dataDir }) {
 				url,
 			]),
 			'--timeout-secs',
-			'90',
+			String(timeoutSeconds),
 		], {
 			cwd: fixture.repository,
 			env: {
@@ -133,7 +160,7 @@ function runStandardApproval({ fixture, request, dataDir }) {
 		const timeout = setTimeout(() => {
 			child.kill('SIGTERM');
 			reject(new Error(`standard approval helper timed out: ${stderr}`));
-		}, 120_000);
+		}, (timeoutSeconds + 30) * 1_000);
 		child.stdout.on('data', (chunk) => {
 			stdout += chunk.toString();
 			for (;;) {
@@ -172,100 +199,15 @@ function runStandardApproval({ fixture, request, dataDir }) {
 	});
 }
 
-function stageLiveExitApproval({ fixture, request, config, dataDir }) {
-	const crate = path.join(dataDir, 'live-exit-approval');
-	const source = path.join(crate, 'src');
-	mkdirSync(source, { recursive: true });
-	writeFileSync(path.join(crate, 'Cargo.toml'), [
-		'[package]',
-		'name = "iris-webvm-live-exit-approval"',
-		'version = "0.0.0"',
-		'edition = "2024"',
-		'',
-		'[dependencies]',
-		`nostr-vpn-app-core = { path = ${JSON.stringify(path.join(
-			fixture.repository,
-			'crates/nostr-vpn-app-core',
-		))} }`,
-		'',
-	].join('\n'), { mode: 0o600 });
-	copyFileSync(
-		path.resolve('tests/fixtures/stage-live-join-approval.rs'),
-		path.join(source, 'main.rs'),
-	);
-	return execFileSync(process.env.CARGO || 'cargo', [
-		'run', '--quiet', '--manifest-path', path.join(crate, 'Cargo.toml'), '--',
-		config, request, fixture.binary,
-	], {
-		cwd: fixture.repository,
-		encoding: 'utf8',
-		env: { ...process.env, RUSTC_WRAPPER: '' },
-		timeout: 120_000,
-	}).trim();
-}
-
-function recipientFromJoinRequest(request) {
-	const encoded = request.slice('nvpn://join-request/'.length);
-	const bootstrap = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-	return normalizedPubkey(bootstrap.deviceAppKeyNpub);
-}
-
-function joinOutbox(config) {
-	return path.join(path.dirname(config), `${path.basename(config)}.join-roster-outbox`);
-}
-
-function snapshotOutbox(config) {
-	try {
-		return new Set(readdirSync(joinOutbox(config)));
-	} catch (error) {
-		if (error?.code === 'ENOENT') return new Set();
-		throw error;
-	}
-}
-
-function removeNewOutboxEntries(config, previous) {
-	const directory = joinOutbox(config);
-	let entries;
-	try {
-		entries = readdirSync(directory);
-	} catch (error) {
-		if (error?.code === 'ENOENT') return;
-		throw error;
-	}
-	for (const entry of entries) {
-		if (!previous.has(entry)) rmSync(path.join(directory, entry));
-	}
-	if (previous.size === 0) {
-		try {
-			rmdirSync(directory);
-		} catch (error) {
-			if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error;
-		}
-	}
-}
-
-function runExitAdmin(binary, config, args) {
-	return execFileSync(binary, [...args, '--config', config], {
-		encoding: 'utf8',
-		timeout: 30_000,
-	}).trim();
-}
-
-function exitAdminStatus(binary, config) {
-	return JSON.parse(runExitAdmin(binary, config, ['status', '--json']));
-}
-
-function normalizedPubkey(value) {
-	if (/^[0-9a-f]{64}$/u.test(value)) return value;
-	const decoded = nip19.decode(value);
-	if (decoded.type !== 'npub' || typeof decoded.data !== 'string') {
-		throw new Error('exit admin status returned an invalid device ID');
-	}
-	return decoded.data;
-}
-
 test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
-	test.setTimeout(420_000);
+	test.setTimeout(720_000);
+	const browserFipsLogs = [];
+	page.on('console', (message) => {
+		const text = message.text();
+		if (!/fips|lookup|session|websocket|ethernet/iu.test(text)) return;
+		browserFipsLogs.push(`${message.type()}: ${text}`);
+		if (browserFipsLogs.length > 200) browserFipsLogs.shift();
+	});
 	const fixture = inspectNativeFixture();
 	const dataDir = mkdtempSync(path.join(tmpdir(), 'nvpn-standard-join-e2e-'));
 	const exitAdmin = EXIT_ADMIN_CONFIG ? {
@@ -275,6 +217,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 	let joinedRecipient = '';
 	let expectedExit = '';
 	let exitOutboxBefore = new Set();
+	let exitServiceStopped = false;
 	if (exitAdmin) {
 		const status = exitAdminStatus(exitAdmin.binary, exitAdmin.config);
 		expect(status.advertise_exit_node).toBe(true);
@@ -282,8 +225,9 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(status.wireguard_exit?.configured).toBe(false);
 		expectedExit = normalizedPubkey(status.device_id);
 		exitOutboxBefore = snapshotOutbox(exitAdmin.config);
+		if (EXIT_ADMIN_EXCLUSIVE) stageExitAdminConfig(exitAdmin.config, dataDir);
 	}
-	await page.goto('/v86');
+	await page.goto('/v86?webvm-e2e=1');
 	await attachSerial(page);
 	try {
 		await waitUntil(
@@ -359,7 +303,44 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 
 		let approvalEvents;
 		try {
-			if (exitAdmin) {
+			if (exitAdmin && EXIT_ADMIN_EXCLUSIVE) {
+				stopExitAdminService();
+				exitServiceStopped = true;
+				try {
+					const attempts = Number.parseInt(
+						process.env.NVPN_STANDARD_APPROVAL_ATTEMPTS || '3',
+						10,
+					);
+					if (!Number.isInteger(attempts) || attempts < 1) {
+						throw new Error('NVPN_STANDARD_APPROVAL_ATTEMPTS must be a positive integer');
+					}
+					approvalEvents = [];
+					for (let attempt = 1; attempt <= attempts; attempt += 1) {
+						approvalEvents.push(...await runStandardApproval({ fixture, request, dataDir }));
+						if (await guestRosterApplied(page, `signed-roster attempt ${attempt}`)) break;
+						if (attempt === attempts) {
+							throw new Error(
+								`signed roster was not applied after ${attempts} delivery attempts\n` +
+									approvalEvents.map((event) => JSON.stringify(event)).join('\n'),
+							);
+						}
+					}
+				} finally {
+					startExitAdminService();
+					exitServiceStopped = false;
+				}
+				await waitUntil(
+					() => exitAdminStatus(exitAdmin.binary, exitAdmin.config).daemon?.running === true,
+					{ timeoutMs: 60_000, intervalMs: 1_000, message: 'exit admin did not restart' },
+				);
+				joinedRecipient = approvalEvents.find((event) => (
+					event.ok === true && event.event === 'approved'
+				))?.recipient || '';
+				runExitAdmin(exitAdmin.binary, exitAdmin.config, [
+					'add-device', '--device', joinedRecipient, '--json',
+				]);
+				runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
+			} else if (exitAdmin) {
 				joinedRecipient = recipientFromJoinRequest(request);
 				stageLiveExitApproval({
 					fixture,
@@ -382,36 +363,37 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				30_000,
 			);
 			const browser = await page.evaluate(() => ({
+				frames: globalThis.irisWebvmV86?.fipsHost?.ethernetFrameStats,
 				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
 				state: globalThis.irisWebvmV86?.state?.(),
 			}));
 			throw new Error(
 				`${error.message}\nGuest:\n${guest.join('\n')}` +
-					`\nBrowser:\n${JSON.stringify(browser)}`,
+					`\nBrowser:\n${JSON.stringify(browser)}` +
+					`\nBrowser FIPS log:\n${browserFipsLogs.join('\n')}`,
 			);
 		}
 		expect(approvalEvents).toEqual(expect.arrayContaining([
 			expect.objectContaining({ ok: true, event: 'approved' }),
 		]));
-		if (!exitAdmin) {
-			expect(approvalEvents).toEqual(expect.arrayContaining([
-				expect.objectContaining({
-					event: expect.stringMatching(/^(delivered|error)$/u),
-				}),
-			]));
-		}
+		expect(approvalEvents).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				event: expect.stringMatching(/^(delivered|error)$/u),
+			}),
+		]));
 		if (exitAdmin) {
 			expect(joinedRecipient).toMatch(/^[0-9a-f]{64}$/u);
 		}
 		const approved = await runSerialCommand(
 			page,
 			'normal signed-roster approval',
-			"for i in $(seq 1 180); do " +
-				"grep -q '^local_identity_confirmation_pending = false$' /var/lib/nvpn/config.toml " +
+			"for i in $(seq 1 120); do " +
+				"! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
+				"&& grep -q '^shared_roster_signed_by = ' /var/lib/nvpn/config.toml " +
 				"&& exit 0; sleep 1; done; " +
-				"grep -E '^(internet_source|local_identity_confirmation_pending) = ' " +
+			"grep -E '^(internet_source|local_identity_confirmation_pending|shared_roster_signed_by) = ' " +
 				"/var/lib/nvpn/config.toml; nvpn join-request --no-qr --no-wait; exit 1",
-			210_000,
+			150_000,
 		);
 		expect(approved).toEqual([]);
 
@@ -419,14 +401,15 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			await runSerialCommand(
 				page,
 				'automatic private FIPS exit selection',
-				`for i in $(seq 1 180); do status=$(nvpn status --json 2>/dev/null || true); ` +
+				`deadline=$(($(date +%s) + 180)); while [ $(date +%s) -lt "$deadline" ]; do ` +
+					`status=$(timeout 5 nvpn status --json 2>/dev/null || true); ` +
 					`printf '%s\\n' "$status" | grep -q '"exit_node": "${expectedExit}"' ` +
 					`&& printf '%s\\n' "$status" | grep -A 14 '"wireguard_exit"' ` +
 					`| grep -q '"enabled": false' ` +
 					`&& grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
 					`&& ip -4 route show 0.0.0.0/0 | grep -q 'dev nvpn0' ` +
 					`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1 ` +
-					`&& exit 0; sleep 1; done; nvpn status; ip -4 route; exit 1`,
+					`&& exit 0; sleep 1; done; timeout 10 nvpn status || true; ip -4 route; exit 1`,
 				210_000,
 			);
 			await runSerialCommand(
@@ -449,6 +432,14 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(stats.serviceErrors).toBe(0);
 		expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
 	} finally {
+		if (exitServiceStopped) {
+			try {
+				startExitAdminService();
+				exitServiceStopped = false;
+			} catch (error) {
+				console.error(`failed to restart exit admin service: ${error.message}`);
+			}
+		}
 		if (exitAdmin && joinedRecipient) {
 			try {
 				runExitAdmin(exitAdmin.binary, exitAdmin.config, [

@@ -287,7 +287,8 @@ ${WELCOME_BORDER}
 
 	function localDiagnosticsEnabled() {
 		if (!browser) return false;
-		return ['127.0.0.1', 'localhost', '[::1]'].includes(globalThis.location.hostname);
+		return ['127.0.0.1', 'localhost', '[::1]'].includes(globalThis.location.hostname)
+			|| new URLSearchParams(globalThis.location.search).get('webvm-e2e') === '1';
 	}
 
 	async function createV86Instance(options) {

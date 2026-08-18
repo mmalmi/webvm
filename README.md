@@ -2,6 +2,12 @@
 
 Iris WebVM is a private Alpine Linux workspace that runs entirely in the browser. It restores an identity-free, automatically logged-in v86 machine state and connects the guest's virtual Ethernet device to browser-side FIPS transports.
 
+After the first successful nVPN pairing, WebVM selects the first roster peer
+that advertises `0.0.0.0/0` as its private FIPS exit. The one-time selection is
+recorded on the persistent guest disk, so clearing or changing the exit later is
+respected. Set `NVPN_WEBVM_AUTO_SELECT_EXIT=0` in the guest service environment
+to disable this behavior.
+
 The guest includes:
 
 - `htree` and `git-remote-htree`
@@ -36,12 +42,18 @@ configuration:
 NVPN_WEBVM_REAL_E2E=1 \
 NVPN_WEBVM_EXIT_ADMIN_CONFIG=<admin-config.toml> \
 NVPN_WEBVM_EXIT_ADMIN_BIN=<matching-nvpn-binary> \
+NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE=1 \
 NVPN_WEBVM_NVPN_BIN=<matching-nvpn-binary> \
 NVPN_APP_CORE_MANIFEST=<clean-native-source>/crates/nostr-vpn-app-core/Cargo.toml \
 NVPN_WEBVM_NATIVE_SOURCE_SHA=<clean-native-source-commit> \
 NVPN_WEBVM_FIPS_VERSION=<pinned-fips-version> \
   npx playwright test tests/e2e/webvm-native-nostr-vpn.spec.js
 ```
+
+On macOS, `NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE=1` briefly boots out the standard
+nVPN LaunchDaemon while the ordinary join helper owns the same admin identity.
+The test restores the daemon immediately afterward and attempts restoration
+again during cleanup.
 
 Set `NVPN_WEBVM_E2E_BASE_URL=https://webvm.iris.to` to run the same acceptance
 test against the deployed WebVM instead of the local preview.
