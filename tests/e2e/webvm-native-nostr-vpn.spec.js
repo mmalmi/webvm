@@ -423,12 +423,15 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					"echo __TUNNEL__; ip address show dev nvpn0; " +
 					"echo __LISTENERS__; ss -lnup 2>&1 | grep -E '(:53|State)' || true; " +
 					"echo __RESOLVER__; cat /etc/resolv.conf; " +
+					"echo __EXIT_READY__; ready=0; for i in $(seq 1 60); do " +
+					"ping -c 1 -W 2 9.9.9.9 >/dev/null 2>&1 && { ready=1; break; }; sleep 2; done; " +
+					"[ \"$ready\" = 1 ] || fail=1; " +
 					"echo __ICMP__; ping -c 1 -W 10 9.9.9.9 || fail=1; " +
 					"echo __DIRECT_DNS__; nslookup example.com 9.9.9.9 || fail=1; " +
 					"echo __IP_HTTPS__; curl --insecure --fail --silent --show-error " +
 					"--connect-timeout 10 --max-time 30 https://1.1.1.1/cdn-cgi/trace || fail=1; " +
 					"echo __LOCAL_DNS__; nslookup example.com 127.0.0.1 || fail=1; exit $fail",
-				120_000,
+				240_000,
 			);
 		}
 

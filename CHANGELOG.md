@@ -17,6 +17,8 @@
 - Keep the browser underlay at a 1,280-byte FIPS path budget and let the guest
   NIC carry its full 1,302-byte authenticated frame plus Ethernet record header,
   preventing large signed rosters from being truncated at the WebVM boundary.
+- Keep TCP packets discrete when native FIPS writes them into v86's 32-bit TUN,
+  avoiding guest-kernel GRO stalls on HTTPS and encrypted DNS responses.
 - Discover as well as announce on virtual Ethernet so a restarted guest daemon
   replaces the browser's stale authenticated session automatically.
 - Recycle a browser-side Ethernet session when the guest's native FIPS

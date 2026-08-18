@@ -40,6 +40,8 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 		/NVPN_FIPS_NOSTR_DISCOVERY_POLICY=\$\{NVPN_FIPS_NOSTR_DISCOVERY_POLICY:-open\}/u,
 	);
 	assert.match(launcher, /export NVPN_FIPS_NOSTR_DISCOVERY_POLICY/u);
+	assert.match(launcher, /NVPN_FIPS_LINUX_TUN_GRO=\$\{NVPN_FIPS_LINUX_TUN_GRO:-0\}/u);
+	assert.match(launcher, /export NVPN_FIPS_LINUX_TUN_GRO/u);
 	assert.match(
 		launcher,
 		/--fips-host-tunnel-enabled true/u,
