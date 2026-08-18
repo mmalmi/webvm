@@ -20,6 +20,7 @@ import {
 	startExitAdminService,
 	stopExitAdminService,
 } from './helpers/webvm-exit-admin.js';
+import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
@@ -401,22 +402,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(approved).toEqual([]);
 
 		if (exitAdmin) {
-			await runSerialCommand(
-				page,
-				'automatic private FIPS exit selection',
-				`ready=0; for i in $(seq 1 90); do ` +
-					`grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
-					`&& ip -4 route show 0.0.0.0/0 | grep -q 'dev nvpn0' ` +
-					`&& ip link show nvpn0 | grep -q 'mtu 1000' ` +
-					`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1 ` +
-					`&& { ready=1; break; }; sleep 2; done; ` +
-					`[ "$ready" = 1 ] || { timeout 10 nvpn status || true; ip -4 route; exit 1; }; ` +
-					`status=$(timeout 10 nvpn status --json); ` +
-					`printf '%s\\n' "$status" | grep -q '"exit_node": "${expectedExit}"' ` +
-					`&& printf '%s\\n' "$status" | grep -A 14 '"wireguard_exit"' ` +
-					`| grep -q '"enabled": false'`,
-				210_000,
-			);
+			await waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand });
 			try {
 				await runSerialCommand(
 					page,
