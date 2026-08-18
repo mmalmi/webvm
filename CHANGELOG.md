@@ -12,6 +12,8 @@
   ICMP, and HTTPS before deployment.
 - Automatically select the first roster peer that advertises a private IPv4
   default route on a fresh WebVM, while preserving later user exit choices.
+- Let the Ethernet-carried native FIPS tunnel activate its selected private
+  exit without requiring an in-guest IP endpoint for the browser-owned carrier.
 - Keep the browser underlay at a 1,280-byte FIPS path budget and let the guest
   NIC carry its full 1,302-byte authenticated frame plus Ethernet record header,
   preventing large signed rosters from being truncated at the WebVM boundary.
