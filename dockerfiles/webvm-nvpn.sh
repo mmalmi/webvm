@@ -73,11 +73,11 @@ auto_select_first_private_exit() {
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
 
-# The browser's 1,280-byte FIPS path budget can produce a 1,302-byte
-# authenticated FMP frame for a routed 1,200-byte FSP payload. Native Ethernet
-# adds a 3-byte record header, so the guest NIC must carry 1,305 bytes without
-# truncating large signed-roster and FIPS-TCP records.
-ip link set dev "$ethernet_interface" mtu 1305
+# Keep the local browser/guest hop at the standard 1,500-byte Ethernet payload
+# budget. Native and browser Ethernet transports subtract their 3-byte record
+# header and advertise 1,497 bytes; routed WSS/WebRTC hops remain capped at
+# their separate 1,280-byte underlay budget.
+ip link set dev "$ethernet_interface" mtu 1500
 
 # Start unpaired with direct .fips reachability before the daemon reads the
 # config, while browser-side Ethernet remains available for discovery.

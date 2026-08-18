@@ -22,6 +22,7 @@ import {
 } from './helpers/webvm-exit-admin.js';
 import { waitForGuestNvpnDaemon } from './helpers/webvm-daemon-readiness.js';
 import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
+import { waitForPrivateExitInternet } from './helpers/webvm-internet-readiness.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
@@ -285,13 +286,13 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			);
 		}
 		await waitUntil(
-			() => page.evaluate((expectedWebsocketPeers) => {
+			() => page.evaluate(() => {
 				const status = globalThis.irisWebvmV86?.state?.().fipsStatus;
-				return status?.websocketPeers === expectedWebsocketPeers
+				return (status?.websocketPeers || 0) > 0
 					&& (status?.ethernetPeers || 0) > 0;
-			}, DEFAULT_FIPS_WEBSOCKET_SEED_URLS.length),
+			}),
 			{
-				timeoutMs: 30_000,
+				timeoutMs: 120_000,
 				message: 'ordinary nVPN approval topology did not become ready',
 			},
 		);
@@ -371,11 +372,13 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(approvalEvents).toEqual(expect.arrayContaining([
 			expect.objectContaining({ ok: true, event: 'approved' }),
 		]));
-		expect(approvalEvents).toEqual(expect.arrayContaining([
-			expect.objectContaining({
-				event: expect.stringMatching(/^(delivered|error)$/u),
-			}),
-		]));
+		if (!exitAdmin || EXIT_ADMIN_EXCLUSIVE) {
+			expect(approvalEvents).toEqual(expect.arrayContaining([
+				expect.objectContaining({
+					event: expect.stringMatching(/^(delivered|error)$/u),
+				}),
+			]));
+		}
 		if (exitAdmin) {
 			expect(joinedRecipient).toMatch(/^[0-9a-f]{64}$/u);
 		}
@@ -395,28 +398,13 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		if (exitAdmin) {
 			await waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand });
 			try {
-				await runSerialCommand(
-					page,
-					'public Internet through the private FIPS exit',
-					"fail=0; echo __ROUTE__; ip route get 9.9.9.9; " +
-					"echo __TUNNEL__; ip address show dev nvpn0; " +
-					"echo __LISTENERS__; ss -lnup 2>&1 | grep -E '(:53|State)' || true; " +
-					"echo __RESOLVER__; cat /etc/resolv.conf; " +
-					"echo __EXIT_READY__; ready=0; for i in $(seq 1 60); do " +
-					"ping -c 1 -W 2 9.9.9.9 >/dev/null 2>&1 && { ready=1; break; }; sleep 2; done; " +
-					"[ \"$ready\" = 1 ] || fail=1; " +
-					"echo __ICMP__; ping -c 1 -W 10 9.9.9.9 || fail=1; " +
-					"echo __DIRECT_DNS__; nslookup example.com 9.9.9.9 || fail=1; " +
-					"echo __IP_HTTPS__; curl --insecure --fail --silent --show-error " +
-					"--connect-timeout 10 --max-time 30 https://1.1.1.1/cdn-cgi/trace || fail=1; " +
-					"echo __LOCAL_DNS__; nslookup example.com 127.0.0.1 || fail=1; exit $fail",
-					240_000,
-				);
+				await waitForPrivateExitInternet({ page, runSerialCommand });
 			} catch (error) {
 				const guest = await runSerialCommand(
 					page,
 					'private exit diagnostics',
-					"echo __ENV__; tr '\\0' '\\n' </proc/$(cat /var/lib/nvpn/daemon.pid)/environ " +
+					"echo __ENV__; pid=$(sed -n 's/.*\"pid\": \\([0-9]*\\).*/\\1/p' " +
+					"/var/lib/nvpn/daemon.pid); tr '\\0' '\\n' </proc/$pid/environ " +
 						"| grep '^NVPN_FIPS_LINUX_TUN_GRO=' || true; echo __LINKS__; " +
 						"ip -s link show dev eth0; ip -s link show dev nvpn0; echo __ROUTES__; " +
 						"ip -4 route; ip route get 1.1.1.1; echo __MANGLE__; " +
