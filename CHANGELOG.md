@@ -12,8 +12,9 @@
   ICMP, and HTTPS before deployment.
 - Automatically select the first roster peer that advertises a private IPv4
   default route on a fresh WebVM, while preserving later user exit choices.
-- Cap the guest and browser Ethernet hop at a 1,280-byte FIPS payload so large
-  signed rosters are segmented before crossing WebRTC or WebSocket underlays.
+- Keep the browser underlay at a 1,280-byte FIPS path budget and let the guest
+  NIC carry its full 1,302-byte authenticated frame plus Ethernet record header,
+  preventing large signed rosters from being truncated at the WebVM boundary.
 - Discover as well as announce on virtual Ethernet so a restarted guest daemon
   replaces the browser's stale authenticated session automatically.
 - Recycle a browser-side Ethernet session when the guest's native FIPS

@@ -94,5 +94,5 @@ test('WebVM Ethernet carries full-size native FIPS frames', () => {
 	assert.match(host, /ethernet\.close\(address\)/u);
 	assert.match(host, /new WebSocketTransport\([\s\S]*mtu: WEBVM_FIPS_UNDERLAY_MTU/u);
 	assert.match(host, /new WebRtcTransport\([\s\S]*mtu: WEBVM_FIPS_UNDERLAY_MTU/u);
-	assert.match(guest, /ip link set dev "\$ethernet_interface" mtu 1283/u);
+	assert.match(guest, /ip link set dev "\$ethernet_interface" mtu 1305/u);
 });

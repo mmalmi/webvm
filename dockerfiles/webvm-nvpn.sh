@@ -50,10 +50,11 @@ auto_select_first_private_exit() {
 install -d -m 0700 "$state_dir"
 install -d -m 0755 "$runtime_dir"
 
-# Native FIPS subtracts the 3-byte Ethernet record header from this interface
-# MTU. Keep its advertised path at the 1,280-byte browser underlay boundary so
-# reliable state-control records are segmented before crossing WebRTC or WSS.
-ip link set dev "$ethernet_interface" mtu 1283
+# The browser's 1,280-byte FIPS path budget can produce a 1,302-byte
+# authenticated FMP frame for a routed 1,200-byte FSP payload. Native Ethernet
+# adds a 3-byte record header, so the guest NIC must carry 1,305 bytes without
+# truncating large signed-roster and FIPS-TCP records.
+ip link set dev "$ethernet_interface" mtu 1305
 
 # Start unpaired with direct .fips reachability before the daemon reads the
 # config, while browser-side Ethernet remains available for discovery.
