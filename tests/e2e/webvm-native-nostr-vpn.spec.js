@@ -117,6 +117,21 @@ async function guestRosterApplied(page, label = 'signed-roster application check
 	}
 }
 
+async function guestApprovalPathReady(page) {
+	try {
+		await runSerialCommand(
+			page,
+			'guest FIPS approval-path readiness probe',
+			"nvpn join-request --no-qr --no-wait 2>&1 | " +
+				"grep -Fq 'FIPS connection active; approval can be delivered'",
+			10_000,
+		);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function runStandardApproval({ fixture, request, dataDir }) {
 	return new Promise((resolve, reject) => {
 		const timeoutSeconds = Number.parseInt(
@@ -299,6 +314,14 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 
 		let approvalEvents;
 		try {
+			await waitUntil(
+				() => guestApprovalPathReady(page),
+				{
+					timeoutMs: 180_000,
+					intervalMs: 2_000,
+					message: 'ordinary nVPN guest did not establish an approval delivery path',
+				},
+			);
 			if (exitAdmin && EXIT_ADMIN_EXCLUSIVE) {
 				stopExitAdminService();
 				exitServiceStopped = true;

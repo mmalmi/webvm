@@ -5,6 +5,8 @@
 ## 2.0.5 - 2026-08-18
 
 - Upgrade the 32-bit guest to nVPN 4.1.8 and native FIPS 0.4.59.
+- Report the browser Ethernet peer as an active pre-pairing FIPS delivery path,
+  allowing ordinary signed-roster approval to wait for real reachability.
 - Upgrade the browser to FIPS TypeScript runtime 0.0.31, including its
   simultaneous WebRTC session-glare fix.
 - Exercise ordinary signed-roster pairing against a real private FIPS exit and
