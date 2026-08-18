@@ -31,6 +31,7 @@ COPY webvm-profile.sh /etc/profile.d/webvm.sh
 COPY webvm-network.sh /usr/local/sbin/webvm-network
 COPY webvm-tun.sh /usr/local/sbin/webvm-tun
 COPY webvm-nvpn.sh /usr/local/sbin/webvm-nvpn
+COPY webvm-first-exit.awk /usr/local/libexec/webvm-first-exit.awk
 COPY webvm-underlay.openrc /etc/init.d/webvm-underlay
 COPY webvm-hashtree.openrc /etc/init.d/webvm-hashtree
 COPY webvm-nvpn.openrc /etc/init.d/webvm-nvpn

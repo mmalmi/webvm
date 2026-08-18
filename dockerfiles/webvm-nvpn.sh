@@ -13,16 +13,8 @@ auto_select_marker=$state_dir/.webvm-exit-autoselect-complete
 export NVPN_FIPS_NOSTR_DISCOVERY_POLICY
 
 first_offered_private_exit() {
-    timeout 5 nvpn status --json --config "$config" 2>/dev/null | awk '
-        /"participant_pubkey":/ {
-            peer = $0
-            sub(/^.*"participant_pubkey": *"/, "", peer)
-            sub(/".*$/, "", peer)
-        }
-        /"advertised_routes":/ { in_routes = 1 }
-        in_routes && /"0\.0\.0\.0\/0"/ && peer != "" { print peer; exit }
-        in_routes && /]/ { in_routes = 0 }
-    '
+    timeout 5 nvpn status --json --config "$config" 2>/dev/null | \
+        awk -f /usr/local/libexec/webvm-first-exit.awk
 }
 
 auto_select_first_private_exit() {

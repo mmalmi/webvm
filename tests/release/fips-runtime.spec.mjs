@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
@@ -60,14 +61,41 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 
 test('WebVM guest autoselects one offered private exit without overriding later choices', () => {
 	const launcher = readFileSync('dockerfiles/webvm-nvpn.sh', 'utf8');
+	const selector = 'dockerfiles/webvm-first-exit.awk';
 	assert.match(launcher, /NVPN_WEBVM_AUTO_SELECT_EXIT:-1/u);
 	assert.match(launcher, /\.webvm-exit-autoselect-complete/u);
-	assert.match(launcher, /"advertised_routes":/u);
-	assert.match(launcher, /"0\\\.0\\\.0\\\.0\\\/0"/u);
+	assert.match(launcher, /awk -f \/usr\/local\/libexec\/webvm-first-exit\.awk/u);
 	assert.match(launcher, /timeout 5 nvpn status --json/u);
 	assert.match(launcher, /nvpn set --config "\$config" --exit-node "\$exit_peer"/u);
 	assert.match(launcher, /nvpn reload --config "\$config"/u);
 	assert.doesNotMatch(launcher, /--wireguard-exit-enabled true/u);
+
+	for (const peerFirst of [false, true]) {
+		const candidate = [
+			'    {',
+			...(peerFirst ? ['      "participant_pubkey": "offered-exit",'] : []),
+			'      "advertised_routes": [',
+			'        "0.0.0.0/0"',
+			'      ],',
+			...(!peerFirst ? ['      "participant_pubkey": "offered-exit",'] : []),
+			'      "reachable": true',
+			'    }',
+		];
+		const status = [
+			'{',
+			'  "peers": [',
+			'    {',
+			'      "advertised_routes": [],',
+			'      "participant_pubkey": "ordinary-peer"',
+			'    },',
+			...candidate,
+			'  ]',
+			'}',
+		].join('\n');
+		const parsed = spawnSync('awk', ['-f', selector], { input: status, encoding: 'utf8' });
+		assert.equal(parsed.status, 0, parsed.stderr);
+		assert.equal(parsed.stdout.trim(), 'offered-exit');
+	}
 });
 
 test('WebVM guest retains the Linux firewall required by the FIPS host tunnel', () => {
