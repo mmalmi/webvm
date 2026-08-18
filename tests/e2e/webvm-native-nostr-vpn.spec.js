@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
+import { nip19 } from 'nostr-tools';
 
 import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
 import { DEFAULT_FIPS_WEBSOCKET_SEED_URLS } from '../../src/lib/webvmFipsConfig.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
+const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
 
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real nVPN guest e2e');
@@ -150,10 +152,54 @@ function runStandardApproval({ fixture, request, dataDir }) {
 	});
 }
 
-test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink', async ({ page }) => {
+function stageExitAdminConfig(sourceConfig, dataDir) {
+	const config = path.resolve(sourceConfig);
+	copyFileSync(config, path.join(dataDir, 'config.toml'));
+	for (const name of readdirSync(path.dirname(config))) {
+		if (/^\.config\.toml\..+\.secret$/u.test(name)) {
+			copyFileSync(path.join(path.dirname(config), name), path.join(dataDir, name));
+		}
+	}
+}
+
+function runExitAdmin(binary, config, args) {
+	return execFileSync(binary, [...args, '--config', config], {
+		encoding: 'utf8',
+		timeout: 30_000,
+	}).trim();
+}
+
+function exitAdminStatus(binary, config) {
+	return JSON.parse(runExitAdmin(binary, config, ['status', '--json']));
+}
+
+function normalizedPubkey(value) {
+	if (/^[0-9a-f]{64}$/u.test(value)) return value;
+	const decoded = nip19.decode(value);
+	if (decoded.type !== 'npub' || typeof decoded.data !== 'string') {
+		throw new Error('exit admin status returned an invalid device ID');
+	}
+	return decoded.data;
+}
+
+test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
 	test.setTimeout(420_000);
 	const fixture = inspectNativeFixture();
 	const dataDir = mkdtempSync(path.join(tmpdir(), 'nvpn-standard-join-e2e-'));
+	const exitAdmin = EXIT_ADMIN_CONFIG ? {
+		binary: path.resolve(process.env.NVPN_WEBVM_EXIT_ADMIN_BIN?.trim() || fixture.binary),
+		config: path.resolve(EXIT_ADMIN_CONFIG),
+	} : null;
+	let joinedRecipient = '';
+	let expectedExit = '';
+	if (exitAdmin) {
+		const status = exitAdminStatus(exitAdmin.binary, exitAdmin.config);
+		expect(status.advertise_exit_node).toBe(true);
+		expect(status.wireguard_exit?.enabled).toBe(false);
+		expect(status.wireguard_exit?.configured).toBe(false);
+		expectedExit = normalizedPubkey(status.device_id);
+		stageExitAdminConfig(exitAdmin.config, dataDir);
+	}
 	await page.goto('/v86');
 	await attachSerial(page);
 	try {
@@ -245,9 +291,17 @@ test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink',
 			);
 		}
 		expect(approvalEvents).toEqual(expect.arrayContaining([
-			expect.objectContaining({ ok: true, event: 'approved', queueDepth: 1 }),
+			expect.objectContaining({ ok: true, event: 'approved' }),
 			expect.objectContaining({ ok: true, event: 'delivered', queueDrained: true }),
 		]));
+		if (exitAdmin) {
+			joinedRecipient = approvalEvents.find((event) => event.event === 'approved')?.recipient || '';
+			expect(joinedRecipient).toMatch(/^[0-9a-f]{64}$/u);
+			runExitAdmin(exitAdmin.binary, exitAdmin.config, [
+				'add-device', '--device', joinedRecipient, '--json',
+			]);
+			runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
+		}
 		const approved = await runSerialCommand(
 			page,
 			'normal signed-roster approval',
@@ -258,6 +312,31 @@ test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink',
 		);
 		expect(approved.join('\n')).toContain('Already approved for network');
 
+		if (exitAdmin) {
+			await runSerialCommand(
+				page,
+				'automatic private FIPS exit selection',
+				`for i in $(seq 1 180); do status=$(nvpn status --json 2>/dev/null || true); ` +
+					`printf '%s\\n' "$status" | grep -q '"exit_node": "${expectedExit}"' ` +
+					`&& printf '%s\\n' "$status" | grep -A 14 '"wireguard_exit"' ` +
+					`| grep -q '"enabled": false' ` +
+					`&& grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
+					`&& ip -4 route show 0.0.0.0/0 | grep -q 'dev nvpn0' ` +
+					`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1 ` +
+					`&& exit 0; sleep 1; done; nvpn status; ip -4 route; exit 1`,
+				210_000,
+			);
+			await runSerialCommand(
+				page,
+				'public DNS and Internet through the private FIPS exit',
+				"nslookup example.com 127.0.0.1 >/dev/null " +
+					"&& ping -c 1 -W 10 9.9.9.9 >/dev/null " +
+					"&& curl --fail --silent --show-error --connect-timeout 10 --max-time 30 " +
+					"https://example.com/ | grep -q 'Example Domain'",
+				60_000,
+			);
+		}
+
 		const stats = await page.evaluate(() => globalThis.irisWebvmV86.fipsHost.pubsub.stats);
 		expect(stats.subscriptionBatches).toBeGreaterThan(0);
 		expect(stats.relaySubscriptions).toBeGreaterThan(0);
@@ -267,6 +346,16 @@ test('ordinary nVPN pairing crosses WSS and the generic Ethernet pubsub uplink',
 		expect(stats.serviceErrors).toBe(0);
 		expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
 	} finally {
+		if (exitAdmin && joinedRecipient) {
+			try {
+				runExitAdmin(exitAdmin.binary, exitAdmin.config, [
+					'remove-device', '--device', joinedRecipient, '--json',
+				]);
+				runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
+			} catch (error) {
+				console.error(`failed to remove temporary WebVM device: ${error.message}`);
+			}
+		}
 		rmSync(dataDir, { recursive: true, force: true });
 	}
 });

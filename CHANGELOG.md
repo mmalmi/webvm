@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.0.5 - 2026-08-18
+
+- Upgrade the 32-bit guest to nVPN 4.1.7 and native FIPS 0.4.59.
+- Exercise ordinary signed-roster pairing against a real private FIPS exit and
+  require automatic exit selection, a non-WireGuard default route, public DNS,
+  ICMP, and HTTPS before deployment.
+- Allow the credentialed real-guest test to run unchanged against a deployed
+  WebVM URL for production acceptance.
+
 ## 2.0.4 - 2026-07-20
 
 - Upgrade the vendored browser transports to FIPS TypeScript 0.0.29 for

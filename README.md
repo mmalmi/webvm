@@ -28,6 +28,23 @@ npm run test:e2e
 ```
 
 The credentialed end-to-end Nostr VPN test is skipped unless its host-test environment is configured.
+To additionally prove automatic private-exit selection and public traffic through
+an existing non-WireGuard exit, point the test at an exit-advertising admin
+configuration:
+
+```sh
+NVPN_WEBVM_REAL_E2E=1 \
+NVPN_WEBVM_EXIT_ADMIN_CONFIG=<admin-config.toml> \
+NVPN_WEBVM_EXIT_ADMIN_BIN=<matching-nvpn-binary> \
+NVPN_WEBVM_NVPN_BIN=<matching-nvpn-binary> \
+NVPN_APP_CORE_MANIFEST=<clean-native-source>/crates/nostr-vpn-app-core/Cargo.toml \
+NVPN_WEBVM_NATIVE_SOURCE_SHA=<clean-native-source-commit> \
+NVPN_WEBVM_FIPS_VERSION=<pinned-fips-version> \
+  npx playwright test tests/e2e/webvm-native-nostr-vpn.spec.js
+```
+
+Set `NVPN_WEBVM_E2E_BASE_URL=https://webvm.iris.to` to run the same acceptance
+test against the deployed WebVM instead of the local preview.
 
 ## Guest image and state
 
