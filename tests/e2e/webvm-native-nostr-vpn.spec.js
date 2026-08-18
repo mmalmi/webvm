@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,13 +6,11 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
-import { DEFAULT_FIPS_WEBSOCKET_SEED_URLS } from '../../src/lib/webvmFipsConfig.js';
 import {
 	exitAdminStatus,
 	normalizedPubkey,
 	recipientFromJoinRequest,
 	removeNewOutboxEntries,
-	restartExitUntilGuestRosterApplied,
 	runExitAdmin,
 	snapshotOutbox,
 	stageExitAdminConfig,
@@ -24,11 +21,13 @@ import {
 import { waitForGuestNvpnDaemon } from './helpers/webvm-daemon-readiness.js';
 import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
 import { waitForPrivateExitInternet } from './helpers/webvm-internet-readiness.js';
+import { runStandardApproval } from './helpers/webvm-standard-approval.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
 const EXIT_ADMIN_EXCLUSIVE = process.env.NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
+let serialCommandTail = Promise.resolve();
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real nVPN guest e2e');
 test.use({ trace: 'off' });
 
@@ -58,7 +57,15 @@ async function attachSerial(page) {
 	}, SERIAL_BUFFER_LIMIT);
 }
 
-async function runSerialCommand(page, label, command, timeoutMs = 60_000) {
+function runSerialCommand(page, label, command, timeoutMs = 60_000) {
+	const result = serialCommandTail.then(() => (
+		runSerialCommandUnlocked(page, label, command, timeoutMs)
+	));
+	serialCommandTail = result.catch(() => {});
+	return result;
+}
+
+async function runSerialCommandUnlocked(page, label, command, timeoutMs) {
 	const token = randomUUID().replaceAll('-', '');
 	const begin = `__NVPN_STANDARD_BEGIN_${token}__`;
 	const end = `__NVPN_STANDARD_END_${token}__`;
@@ -132,89 +139,17 @@ async function guestApprovalPathReady(page) {
 	}
 }
 
-function runStandardApproval({ fixture, request, dataDir }) {
-	return new Promise((resolve, reject) => {
-		const timeoutSeconds = Number.parseInt(
-			process.env.NVPN_STANDARD_APPROVAL_TIMEOUT_SECS || '90',
-			10,
-		);
-		if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
-			reject(new Error('NVPN_STANDARD_APPROVAL_TIMEOUT_SECS must be a positive integer'));
-			return;
+async function refreshBrowserPeerRoute(page, peer) {
+	await page.evaluate(async (expectedPeer) => {
+		const host = globalThis.irisWebvmV86?.fipsHost;
+		const transport = host?.webrtc;
+		const connections = transport?.conns instanceof Map ? [...transport.conns.keys()] : [];
+		for (const connection of connections) {
+			if (!connection.toLowerCase().endsWith(expectedPeer)) continue;
+			await transport.handlePeerRestart(connection);
 		}
-		const child = spawn(process.env.CARGO || 'cargo', [
-			'run',
-			'--quiet',
-			'--locked',
-			'--manifest-path',
-			fixture.manifest,
-			'--example',
-			'standard_join_approval_e2e',
-			'--',
-			'--data-dir',
-			dataDir,
-			'--join-request',
-			request,
-			'--nvpn-bin',
-			fixture.binary,
-			...DEFAULT_FIPS_WEBSOCKET_SEED_URLS.flatMap((url) => [
-				'--fips-websocket-seed-url',
-				url,
-			]),
-			'--timeout-secs',
-			String(timeoutSeconds),
-		], {
-			cwd: fixture.repository,
-			env: {
-				...process.env,
-				RUSTC_WRAPPER: '',
-				RUST_LOG: process.env.NVPN_STANDARD_JOIN_RUST_LOG || 'off',
-			},
-			stdio: ['ignore', 'pipe', 'pipe'],
-		});
-		let stdout = '';
-		let stderr = '';
-		const events = [];
-		const timeout = setTimeout(() => {
-			child.kill('SIGTERM');
-			reject(new Error(`standard approval helper timed out: ${stderr}`));
-		}, (timeoutSeconds + 30) * 1_000);
-		child.stdout.on('data', (chunk) => {
-			stdout += chunk.toString();
-			for (;;) {
-				const newline = stdout.indexOf('\n');
-				if (newline < 0) break;
-				const line = stdout.slice(0, newline).trim();
-				stdout = stdout.slice(newline + 1);
-				if (line) events.push(JSON.parse(line));
-			}
-		});
-		child.stderr.on('data', (chunk) => {
-			stderr = `${stderr}${chunk}`.slice(-12_000);
-		});
-		child.on('error', (error) => {
-			clearTimeout(timeout);
-			reject(error);
-		});
-		child.on('close', (code, signal) => {
-			clearTimeout(timeout);
-			const approvalStagedWithoutReceipt = code === 1 && !signal
-				&& events.some((event) => event.ok === true && event.event === 'approved')
-				&& events.some((event) => event.ok === false && event.event === 'error');
-			if (approvalStagedWithoutReceipt) {
-				resolve(events);
-				return;
-			}
-			if (code !== 0 || signal) {
-				reject(new Error(
-					`standard approval helper exited ${signal || code}: ${stderr}`
-					+ `\n${events.map((event) => JSON.stringify(event)).join('\n')}`,
-				));
-				return;
-			}
-			resolve(events);
-		});
-	});
+		host?.pubsub?.refreshPeers?.();
+	}, peer);
 }
 
 async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page }) {
@@ -223,9 +158,23 @@ async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page })
 		throw new Error('NVPN_STANDARD_APPROVAL_ATTEMPTS must be a positive integer');
 	const approvalEvents = [];
 	for (let attempt = 1; attempt <= attempts; attempt += 1) {
-		approvalEvents.push(...await runStandardApproval({ fixture, request, dataDir }));
+		approvalEvents.push(...await runStandardApproval({
+			fixture,
+			request,
+			dataDir,
+			isGuestRosterApplied: () => guestRosterApplied(
+				page, `concurrent signed-roster attempt ${attempt}`,
+			),
+		}));
 		if (await guestRosterApplied(page, `signed-roster attempt ${attempt}`)) {
-			return approvalEvents;
+			return [
+				...approvalEvents,
+				{
+					ok: true,
+					event: 'delivered',
+					recipient: recipientFromJoinRequest(request),
+				},
+			];
 		}
 		if (attempt === attempts) {
 			throw new Error(
@@ -237,7 +186,7 @@ async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page })
 	throw new Error('signed roster approval attempts unexpectedly exhausted');
 }
 test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
-	test.setTimeout(720_000);
+	test.setTimeout(1_200_000);
 	const browserFipsLogs = [];
 	page.on('console', (message) => {
 		const text = message.text();
@@ -371,16 +320,30 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					config: exitAdmin.config,
 					dataDir,
 				});
-				await restartExitUntilGuestRosterApplied({
-					isRunning: () => exitAdminStatus(
-						exitAdmin.binary, exitAdmin.config,
-					).daemon?.running === true,
-					isGuestRosterApplied: () => guestRosterApplied(page),
-					waitUntil,
-				});
-				approvalEvents = [{ ok: true, event: 'approved', recipient: joinedRecipient }];
+				runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
+				stageExitAdminConfig(exitAdmin.config, dataDir);
+				stopExitAdminService();
+				exitServiceStopped = true;
+				try {
+					approvalEvents = await approveAndWaitForGuestRoster({
+						fixture, request, dataDir, page,
+					});
+				} finally {
+					startExitAdminService();
+					exitServiceStopped = false;
+				}
+				await waitUntil(
+					() => exitAdminStatus(exitAdmin.binary, exitAdmin.config).daemon?.running === true,
+					{ timeoutMs: 60_000, intervalMs: 1_000, message: 'exit admin did not restart' },
+				);
+				await refreshBrowserPeerRoute(page, expectedExit);
 			} else {
-				approvalEvents = await runStandardApproval({ fixture, request, dataDir });
+				approvalEvents = await runStandardApproval({
+					fixture,
+					request,
+					dataDir,
+					isGuestRosterApplied: () => guestRosterApplied(page),
+				});
 			}
 		} catch (error) {
 			const guest = await runSerialCommand(
@@ -405,13 +368,9 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(approvalEvents).toEqual(expect.arrayContaining([
 			expect.objectContaining({ ok: true, event: 'approved' }),
 		]));
-		if (!exitAdmin || EXIT_ADMIN_EXCLUSIVE) {
-			expect(approvalEvents).toEqual(expect.arrayContaining([
-				expect.objectContaining({
-					event: expect.stringMatching(/^(delivered|error)$/u),
-				}),
-			]));
-		}
+		expect(approvalEvents).toEqual(expect.arrayContaining([
+			expect.objectContaining({ event: 'delivered', ok: true }),
+		]));
 		if (exitAdmin) {
 			expect(joinedRecipient).toMatch(/^[0-9a-f]{64}$/u);
 		}

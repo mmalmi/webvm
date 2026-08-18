@@ -143,31 +143,3 @@ export function startExitAdminService() {
 	if (!exitAdminServiceLoaded()) runLaunchctl(['bootstrap', 'system', LAUNCHD_PLIST]);
 	runLaunchctl(['kickstart', '-k', LAUNCHD_LABEL]);
 }
-
-export async function restartExitUntilGuestRosterApplied({
-	isRunning,
-	isGuestRosterApplied,
-	waitUntil,
-	attempts = 3,
-}) {
-	let lastError;
-	for (let attempt = 1; attempt <= attempts; attempt += 1) {
-		startExitAdminService();
-		await waitUntil(isRunning, {
-			timeoutMs: 60_000,
-			intervalMs: 1_000,
-			message: `exit admin did not restart for delivery attempt ${attempt}`,
-		});
-		try {
-			await waitUntil(isGuestRosterApplied, {
-				timeoutMs: 60_000,
-				intervalMs: 2_000,
-				message: `live exit delivery attempt ${attempt} did not apply the signed roster`,
-			});
-			return;
-		} catch (error) {
-			lastError = error;
-		}
-	}
-	throw lastError || new Error('live exit did not deliver the signed roster');
-}
