@@ -33,6 +33,9 @@
 - Upgrade the 32-bit guest and public bootstrap seeds to native FIPS 0.4.61,
   evict persistently poisoned end-to-end sessions, and preserve fresh-client
   admission headroom as the public mesh grows.
+- Upgrade the guest and public bootstrap seeds to native FIPS 0.4.62, closing
+  orphaned browser WebSockets after an authenticated route expires so WebVM
+  reconnects and receives a later admin approval.
 - Quiet BusyBox history persistence at each interactive prompt, preventing the
   full command history from flooding the console and obscuring pairing updates.
 - Keep the restored shell in its concise, bounded startup state until nVPN has
