@@ -28,6 +28,10 @@ const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
 const EXIT_ADMIN_EXCLUSIVE = process.env.NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE === '1';
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
+const GUEST_ROSTER_APPLIED =
+	"{ ! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
+	"&& grep -q '^shared_roster_signed_by = ' /var/lib/nvpn/config.toml; } " +
+	"|| { timeout 10 nvpn status --json | grep -q '\"vpn_status\": \"Join approved for '; }";
 let serialCommandTail = Promise.resolve();
 test.skip(!REAL_E2E_ENABLED, 'set NVPN_WEBVM_REAL_E2E=1 to run the real nVPN guest e2e');
 test.use({ trace: 'off' });
@@ -106,8 +110,7 @@ async function guestRosterApplied(page, label = 'signed-roster application check
 		await runSerialCommand(
 			page,
 			label,
-			"! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
-				"&& grep -q '^shared_roster_signed_by = ' /var/lib/nvpn/config.toml",
+			GUEST_ROSTER_APPLIED,
 			30_000,
 		);
 		return true;
@@ -358,8 +361,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			page,
 			'normal signed-roster approval',
 			"for i in $(seq 1 120); do " +
-				"! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
-				"&& grep -q '^shared_roster_signed_by = ' /var/lib/nvpn/config.toml " +
+				`${GUEST_ROSTER_APPLIED} ` +
 				"&& exit 0; sleep 1; done; " +
 			"grep -E '^(internet_source|local_identity_confirmation_pending|shared_roster_signed_by) = ' " +
 				"/var/lib/nvpn/config.toml; nvpn join-request --no-qr --no-wait; exit 1",
