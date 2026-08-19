@@ -213,7 +213,7 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 		(text) => text.includes('webvm-nvpn start'),
 	));
 	expect(resumeCommand).toContain(
-		"hostname webvm; export PS1='$(history -w 2>/dev/null)root@webvm:\\w# '",
+		"hostname webvm; export PS1='$(history -w >/dev/null 2>&1)root@webvm:\\w# '",
 	);
 	expect(resumeCommand).toContain(
 		"sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'",

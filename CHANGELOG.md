@@ -17,6 +17,8 @@
 - Re-resolve a live transit session after its learned browser next hop disappears,
   allowing paired exit traffic to heal onto another authenticated mesh path
   without restarting nVPN or re-pairing.
+- Quiet BusyBox history persistence at each interactive prompt, preventing the
+  full command history from flooding the console and obscuring pairing updates.
 
 ## 2.0.5 - 2026-08-18
 
