@@ -39,7 +39,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@fips/core": "file:vendor/fips/fips-core-0.0.35.tgz",
+		"@fips/core": "file:vendor/fips/fips-core-0.0.36.tgz",
 		"@fips/tcp": "https://github.com/mmalmi/fips-tcp/releases/download/v0.2.0/fips-tcp-0.2.0.tgz",
 		"@fips/transport-ethernet": "file:vendor/fips/fips-transport-ethernet-0.0.31.tgz",
 		"@fips/transport-webrtc": "file:vendor/fips/fips-transport-webrtc-0.0.47.tgz",
@@ -49,7 +49,7 @@
 		"v86": "^0.5.424"
 	},
 	"overrides": {
-		"@fips/core": "file:vendor/fips/fips-core-0.0.35.tgz",
+		"@fips/core": "file:vendor/fips/fips-core-0.0.36.tgz",
 		"cookie@0.6.0": "1.0.2",
 		"picomatch@2.3.1": "2.3.2"
 	}

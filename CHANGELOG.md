@@ -27,6 +27,9 @@
 - Upgrade the browser to FIPS TypeScript core 0.0.35 and remove a displaced
   guest identity from WebVM admission state before accepting the replacement
   identity at the VM's stable Ethernet address.
+- Upgrade the browser to FIPS TypeScript core 0.0.36 so a timed-out pubsub FSP
+  handshake is discarded and the next delivery attempt starts a fresh session
+  instead of waiting forever on the dead one.
 - Quiet BusyBox history persistence at each interactive prompt, preventing the
   full command history from flooding the console and obscuring pairing updates.
 - Keep the restored shell in its concise, bounded startup state until nVPN has

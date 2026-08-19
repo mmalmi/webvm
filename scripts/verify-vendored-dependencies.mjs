@@ -8,11 +8,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APPROVED_PACKAGES = [
 	{
 		name: '@fips/core',
-		version: '0.0.35',
-		path: 'vendor/fips/fips-core-0.0.35.tgz',
-		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.35/fips-core-0.0.35.tgz',
-		sha256: '3feac617f0a3ab716cd0522dcf0199383e41255465ee344018abf05e85aff8f4',
-		sha512: 'uDoUMW9eNwVDMOkVi/Ud5P/lqkkdR7W9jnzPucJvMDN7uIPb/hSpF3jRLdGKbyRmhcTUruv3+vp4koovmPDmWg==',
+		version: '0.0.36',
+		path: 'vendor/fips/fips-core-0.0.36.tgz',
+		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.36/fips-core-0.0.36.tgz',
+		sha256: '49cc8a43afc551756d6e6f8cdee592f028a30343e0612f1386bc731a6b2be8d0',
+		sha512: 'tfQAjKU1d64k/BxIaEQh9hu4WmGc9VqfCR17rfKF/7Ujb7vxzsV50kAXJmlKExHTkoYtWK3AIrDvz2je3a4vSw==',
 	},
 	{
 		name: '@fips/transport-ethernet',
