@@ -133,6 +133,39 @@ test('WebVM bounds relay replay until an authenticated local peer is admitted', 
 	await guest.stop();
 });
 
+test('WebVM retries a transient FIPS session failure without peer churn', async () => {
+	const network = new MemoryFipsNetwork();
+	const relayClient = new MemoryRelayClient('wss://relay.example');
+	const bridge = await createWebvmNostrPubsubService({
+		node: network.node(hostPeerId),
+		localPeerId: hostPeerId,
+		peers: () => [peerId],
+		filters: FILTERS,
+		relayClients: [relayClient],
+		authorizePeer: (peer) => peer === peerId,
+		peerRefreshIntervalMs: 10,
+		logger: { warn() {} },
+	});
+	await expect.poll(() => bridge.stats.serviceErrors).toBeGreaterThan(0);
+
+	const guest = new FipsNostrPubsubClient({
+		node: network.node(peerId),
+		localPeerId: peerId,
+		peers: () => [hostPeerId],
+		allowedKinds: [7368],
+	}).start();
+	const received = [];
+	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
+	relayClient.requests[0].handlers.onEvent(event);
+	await expect.poll(async () => {
+		await settle(bridge, guest);
+		return received;
+	}).toEqual([event.id]);
+
+	await bridge.stop();
+	await guest.stop();
+});
+
 test('WebVM requires an explicit relay set, local identity, peers, and filters', async () => {
 	const network = new MemoryFipsNetwork();
 	const node = network.node(hostPeerId);

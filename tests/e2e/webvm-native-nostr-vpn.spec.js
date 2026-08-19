@@ -124,8 +124,8 @@ async function guestApprovalPathReady(page) {
 		await runSerialCommand(
 			page,
 			'guest FIPS approval-path readiness probe',
-			"nvpn join-request --no-qr --no-wait 2>&1 | " +
-				"grep -Fq 'FIPS connection active; approval can be delivered'",
+			"grep -Eq '\"fips_other_peer_count\"[[:space:]]*:[[:space:]]*[1-9][0-9]*' " +
+				'/var/lib/nvpn/daemon.state.json',
 			10_000,
 		);
 		return true;
@@ -214,7 +214,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				'&& { nvpn join-request --no-qr >/tmp/nvpn-join-wait.log 2>&1 ' +
 				'& echo $! >/tmp/nvpn-join-wait.pid; } ' +
 				'&& test -s /tmp/nvpn-join-wait.pid ' +
-				"for i in $(seq 1 45); do request=$(grep -m1 '^nvpn://join-request/' " +
+				"&& for i in $(seq 1 45); do request=$(grep -m1 '^nvpn://join-request/' " +
 				'/tmp/nvpn-join-wait.log 2>/dev/null) && { printf \'%s\\n\' "$request"; exit 0; }; ' +
 				'sleep 1; done; cat /tmp/nvpn-join-wait.log; exit 1',
 			90_000,

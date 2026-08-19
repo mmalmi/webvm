@@ -10,6 +10,7 @@ import {
 
 const COMPRESSED_FIPS_KEY = /^(?:02|03)[0-9a-f]{64}$/u;
 const MAX_DEFERRED_RELAY_EVENTS = 64;
+const DEFAULT_PEER_REFRESH_INTERVAL_MS = 2_000;
 const allowBridgeRoutes = {
 	checkEvent: () => allowWithPriority(0),
 	checkSource: () => allowWithPriority(0),
@@ -141,6 +142,7 @@ export async function createWebvmNostrPubsubService({
 	filters,
 	relayClients,
 	limits,
+	peerRefreshIntervalMs = DEFAULT_PEER_REFRESH_INTERVAL_MS,
 	authorizePeer = () => true,
 	logger = console,
 } = {}) {
@@ -155,6 +157,9 @@ export async function createWebvmNostrPubsubService({
 	}
 	if (typeof authorizePeer !== 'function') {
 		throw new TypeError('WebVM Nostr pubsub peer authorization must be a function');
+	}
+	if (!Number.isSafeInteger(peerRefreshIntervalMs) || peerRefreshIntervalMs <= 0) {
+		throw new TypeError('WebVM Nostr pubsub peer refresh interval must be positive');
 	}
 	const bridgeFilters = validateFilters(filters);
 	const relayUrls = validateRelayClients(relayClients);
@@ -281,6 +286,7 @@ export async function createWebvmNostrPubsubService({
 		pending.add(tracked);
 	};
 	let subscription;
+	let peerRefresh;
 	try {
 		subscription = await router.subscribeWithOptions(bridgeFilters, (incoming) => {
 			if (incoming.route.id === relayRouteEntry.id) {
@@ -290,6 +296,12 @@ export async function createWebvmNostrPubsubService({
 			}
 			forward(relay.publish(incoming.event, incoming.source), { operation: 'fips-to-relay' });
 		});
+		peerRefresh = setInterval(() => {
+			if (stopped || admittedPeers().length === 0) return;
+			client.refreshPeers();
+			relayFlushBlocked = false;
+			flushDeferredRelayEvents();
+		}, peerRefreshIntervalMs);
 	} catch (error) {
 		await client.stop();
 		throw error;
@@ -313,6 +325,7 @@ export async function createWebvmNostrPubsubService({
 		async stop() {
 			if (stopped) return;
 			stopped = true;
+			clearInterval(peerRefresh);
 			subscription.close();
 			while (pending.size > 0) await Promise.allSettled([...pending]);
 			await client.stop();

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Retry transient reliable-pubsub FIPS session setup while the authenticated
+  guest remains present, so a recovered approval path does not require peer
+  churn or a page reload.
+- Exercise the blocking join command without repeated daemon requests and keep
+  its approval-wait output bounded before accepting a WebVM release.
+
 ## 2.0.5 - 2026-08-18
 
 - Upgrade the 32-bit guest to nVPN 4.1.8 and native FIPS 0.4.59.
