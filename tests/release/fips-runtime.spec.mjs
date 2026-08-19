@@ -57,6 +57,11 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 		/--fips-host-tunnel-enabled true/u,
 	);
 	assert.match(launcher, /--connect-to-non-roster-fips-peers true/u);
+	assert.match(launcher, /--exit-dns-mode through_exit/u);
+	assert.match(
+		launcher,
+		/--exit-dns-through-exit-servers 9\.9\.9\.9,149\.112\.112\.112/u,
+	);
 	assert.ok(
 		launcher.indexOf('export NVPN_FIPS_NOSTR_DISCOVERY_POLICY')
 			< launcher.indexOf('exec nvpn daemon'),

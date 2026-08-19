@@ -85,6 +85,8 @@ nvpn set \
     --config "$config" \
     --fips-host-tunnel-enabled true \
     --connect-to-non-roster-fips-peers true \
+    --exit-dns-mode through_exit \
+    --exit-dns-through-exit-servers 9.9.9.9,149.112.112.112 \
     >/dev/null
 
 if [ "$auto_select_exit" = 1 ] && [ ! -e "$auto_select_marker" ]; then
