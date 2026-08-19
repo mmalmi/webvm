@@ -205,14 +205,18 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		await waitForGuestNvpnDaemon({ page, runSerialCommand });
 		const output = await runSerialCommand(
 			page,
-			'normal nVPN join request',
+			'blocking nVPN join request',
 			"! grep -q -- '--webvm-' /usr/local/sbin/webvm-nvpn " +
 				"&& grep -qF -- '--fips-ethernet-interface' /usr/local/sbin/webvm-nvpn " +
 				"&& grep -qF -- '--fips-ethernet-discovery-scope' /usr/local/sbin/webvm-nvpn " +
 				'&& ! nvpn webvm-guest --help >/dev/null 2>&1 ' +
-				"&& for i in $(seq 1 12); do output=$(nvpn join-request --no-qr --no-wait 2>&1) " +
-				'&& { printf \'%s\\n\' "$output"; exit 0; }; sleep 2; done; ' +
-				'printf \'%s\\n\' "$output"; exit 1',
+				'&& rm -f /tmp/nvpn-join-wait.log /tmp/nvpn-join-wait.pid ' +
+				'&& { nvpn join-request --no-qr >/tmp/nvpn-join-wait.log 2>&1 ' +
+				'& echo $! >/tmp/nvpn-join-wait.pid; } ' +
+				'&& test -s /tmp/nvpn-join-wait.pid ' +
+				"for i in $(seq 1 45); do request=$(grep -m1 '^nvpn://join-request/' " +
+				'/tmp/nvpn-join-wait.log 2>/dev/null) && { printf \'%s\\n\' "$request"; exit 0; }; ' +
+				'sleep 1; done; cat /tmp/nvpn-join-wait.log; exit 1',
 			90_000,
 		);
 		const request = output.find((line) => line.startsWith('nvpn://join-request/'));
@@ -368,6 +372,22 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			150_000,
 		);
 		expect(approved).toEqual([]);
+		const waitOutput = await runSerialCommand(
+			page,
+			'blocking join-request completion and quiet wait output',
+			'pid=$(cat /tmp/nvpn-join-wait.pid); ' +
+			'for i in $(seq 1 30); do ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done; ' +
+			'! kill -0 "$pid" 2>/dev/null ' +
+			"&& grep -Fqx 'Join request accepted.' /tmp/nvpn-join-wait.log " +
+			"&& count=$(grep -Ec '^(nVPN daemon status is unavailable|No active FIPS connections|" +
+			"FIPS connection active)' /tmp/nvpn-join-wait.log || true) " +
+			'&& test "$count" -le 3 ' +
+			"&& if output=$(nvpn join-request --no-qr --no-wait 2>&1); then " +
+			"printf 'approved device unexpectedly received another request\\n'; exit 1; " +
+			"else printf '%s\\n' \"$output\" | grep -Fq 'already approved'; fi",
+			60_000,
+		);
+		expect(waitOutput).toEqual([]);
 
 		if (exitAdmin) {
 			await waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand });
