@@ -35,3 +35,20 @@ test('ignores an incomplete echoed marker before the completed command result', 
 		output: ['ready'],
 	});
 });
+
+test('uses a completed result before the prompt repeats its command in shell history', () => {
+	const begin = '__NVPN_STANDARD_BEGIN_ghi__';
+	const end = '__NVPN_STANDARD_END_ghi__';
+	const serial = [
+		begin,
+		'nvpn://join-request/example',
+		`${end}:0`,
+		`4 printf '${begin}'; printf '${end}:%s' "$rc"`,
+		'root@webvm:~# ',
+	].join('\n');
+
+	assert.deepEqual(parseSerialCommandResult(serial, begin, end), {
+		status: 0,
+		output: ['nvpn://join-request/example'],
+	});
+});
