@@ -31,6 +31,10 @@ const LIVE_ROSTER_TIMEOUT_MS = Number.parseInt(
 	process.env.NVPN_WEBVM_LIVE_ROSTER_TIMEOUT_MS || '300000',
 	10,
 );
+const APPROVAL_DELAY_MS = Number.parseInt(
+	process.env.NVPN_WEBVM_APPROVAL_DELAY_MS || '45000',
+	10,
+);
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
 const GUEST_ROSTER_APPLIED =
 	"{ ! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
@@ -174,6 +178,7 @@ async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page })
 test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
 	test.setTimeout(1_200_000);
 	expect(LIVE_ROSTER_TIMEOUT_MS).toBeGreaterThan(0);
+	expect(APPROVAL_DELAY_MS).toBeGreaterThanOrEqual(0);
 	const browserFipsLogs = [];
 	page.on('console', (message) => {
 		const text = message.text();
@@ -281,6 +286,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					message: 'ordinary nVPN guest did not establish an approval delivery path',
 				},
 			);
+			await page.waitForTimeout(APPROVAL_DELAY_MS);
 			if (exitAdmin && EXIT_ADMIN_EXCLUSIVE) {
 				stopExitAdminService();
 				exitServiceStopped = true;
