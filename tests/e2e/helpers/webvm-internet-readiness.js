@@ -26,20 +26,26 @@ export async function waitForPrivateExitInternet({ page, runSerialCommand }) {
 	await runSerialCommand(
 		page,
 		'public DNS through the private FIPS exit',
-		'nslookup example.com 9.9.9.9',
-		45_000,
+		'for i in $(seq 1 20); do ' +
+			'( nslookup example.com 9.9.9.9 || nslookup example.com 149.112.112.112 ) ' +
+			'&& exit 0; ' +
+			'sleep 2; done; exit 1',
+		180_000,
 	);
 	await runSerialCommand(
 		page,
 		'public HTTPS through the private FIPS exit',
-		'curl --insecure --fail --silent --show-error --connect-timeout 10 --max-time 30 ' +
-			"https://1.1.1.1/cdn-cgi/trace | grep -q '^ip='",
-		90_000,
+		'for i in $(seq 1 5); do ' +
+			'curl --insecure --fail --silent --show-error --connect-timeout 10 --max-time 30 ' +
+			"https://1.1.1.1/cdn-cgi/trace | grep -q '^ip=' && exit 0; " +
+			'sleep 2; done; exit 1',
+		180_000,
 	);
 	await runSerialCommand(
 		page,
 		'local secure DNS through the private FIPS exit',
-		'nslookup example.com 127.0.0.1',
-		45_000,
+		'for i in $(seq 1 20); do nslookup example.com 127.0.0.1 && exit 0; ' +
+			'sleep 2; done; exit 1',
+		180_000,
 	);
 }
