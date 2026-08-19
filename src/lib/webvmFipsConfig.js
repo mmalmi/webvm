@@ -18,5 +18,9 @@ export const WEBVM_NOSTR_PUBSUB_FILTERS = Object.freeze([
 	Object.freeze({ kinds: Object.freeze([30_064, 30_078]), limit: 32 }),
 ]);
 
-export const WEBVM_FIPS_UNDERLAY_MTU = 1280;
+// Match native FIPS WebSocket's physical-record budget. WebRTC negotiation
+// records can exceed 1,280 bytes after routed SessionDatagram and FMP
+// encapsulation; 1,400 keeps those records intact while FIPS-TCP still
+// segments larger application payloads.
+export const WEBVM_FIPS_UNDERLAY_MTU = 1400;
 export const WEBVM_FIPS_ETHERNET_MTU = 1497;

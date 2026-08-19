@@ -116,6 +116,9 @@ function classifyServiceError(error) {
 	if (message.includes('no route') || message.includes('unroutable')) return 'no-route';
 	if (message.includes('handshake timeout')) return 'handshake-timeout';
 	if (message.includes('before') && message.includes('handshake')) return 'handshake-state';
+	if (message.includes('all FIPS pubsub inventory deliveries failed')) {
+		return 'delivery-unavailable';
+	}
 	if (message.includes('queue')) return 'backpressure';
 	if (message.includes('decrypt')) return 'decrypt-failed';
 	if (message.includes('signature')) return 'signature-failed';
@@ -173,6 +176,7 @@ export async function createWebvmNostrPubsubService({
 		droppedDeferredRelayEvents: 0,
 		flushedDeferredRelayEvents: 0,
 		serviceErrors: 0,
+		serviceErrorClasses: {},
 		serviceErrorOperations: {},
 		lastServiceError: '',
 		lastServiceErrorMessage: '',
@@ -205,10 +209,13 @@ export async function createWebvmNostrPubsubService({
 	};
 	const reportError = (error, context) => {
 		stats.serviceErrors += 1;
+		const classification = classifyServiceError(error);
+		stats.serviceErrorClasses[classification] =
+			(stats.serviceErrorClasses[classification] || 0) + 1;
 		const operation = String(context?.operation || 'bridge');
 		stats.serviceErrorOperations[operation] =
 			(stats.serviceErrorOperations[operation] || 0) + 1;
-		stats.lastServiceError = classifyServiceError(error);
+		stats.lastServiceError = classification;
 		stats.lastServiceErrorMessage = safeServiceErrorMessage(error);
 		logger.warn?.('WebVM Nostr pubsub router error', context, error);
 	};

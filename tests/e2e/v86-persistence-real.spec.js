@@ -1,4 +1,15 @@
+import { randomUUID } from 'node:crypto';
+
 import { expect, test } from '@playwright/test';
+
+import { parseSerialCommandResult } from './helpers/webvm-serial-command.js';
+
+const NVPN_SECRET_PATHS = [
+	'/var/lib/nvpn/.config.toml.nostr-secret-key.secret',
+	'/var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret',
+	'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret',
+];
+const NVPN_SECRET_HASH_COMMAND = `sha256sum ${NVPN_SECRET_PATHS.join(' ')}`;
 
 async function waitForTerminal(page) {
 	await page.waitForFunction(
@@ -20,13 +31,25 @@ async function terminalText(page) {
 }
 
 async function runCommand(page, command, marker) {
+	const token = randomUUID().replaceAll('-', '');
+	const begin = `__WEBVM_PERSISTENCE_BEGIN_${token}__`;
+	const end = `__WEBVM_PERSISTENCE_END_${token}__`;
 	const terminal = page.getByTestId('v86-serial');
 	await terminal.click();
-	await page.keyboard.insertText(`${command}; printf '${marker}\\n'`);
+	await page.keyboard.insertText(
+		`printf '${begin}\\n'; ${command}; rc=$?; ` +
+			`printf '${marker}\\n${end}:%s\\n' "$rc"`,
+	);
 	await page.keyboard.press('Enter');
 	// Commands may intentionally contain a 30-second guest-side readiness loop;
 	// leave enough host-side margin for v86 scheduling and terminal rendering.
-	await expect.poll(() => terminalText(page), { timeout: 60_000 }).toContain(marker);
+	await expect.poll(
+		async () => Boolean(parseSerialCommandResult(await terminalText(page), begin, end)),
+		{ timeout: 60_000 },
+	).toBe(true);
+	const result = parseSerialCommandResult(await terminalText(page), begin, end);
+	expect(result?.status).toBe(0);
+	return result.output.filter((line) => line !== marker);
 }
 
 async function savedDiskExists(page) {
@@ -82,6 +105,7 @@ async function invalidateSavedDiskCompatibility(page) {
 }
 
 test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ page }) => {
+	test.setTimeout(180_000);
 	await page.goto('/v86');
 	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
 		.toContainText('Starting FIPS networking...');
@@ -111,8 +135,21 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 	);
 	await runCommand(
 		page,
-		"mkdir -p /var/lib/nvpn && printf 'network_id = \"upgrade-fixture\"\\n' > /var/lib/nvpn/config.toml && printf 'nostr-secret-fixture\\n' > /var/lib/nvpn/.config.toml.nostr-secret-key.secret && printf 'pending-request-fixture\\n' > /var/lib/nvpn/.config.toml.pending-join-request.secret && printf 'wg-preshared-fixture\\n' > /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && printf 'wg-private-fixture\\n' > /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret",
+		"nvpn set --config /var/lib/nvpn/config.toml --node-name upgrade-fixture " +
+			"--wireguard-exit-enabled false " +
+			"--wireguard-exit-private-key AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= " +
+			"--wireguard-exit-peer-preshared-key AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
 		'__NVPN_STATE_WRITTEN__',
+	);
+	await runCommand(
+		page,
+		'nvpn join-request --config /var/lib/nvpn/config.toml --no-wait --no-qr >/dev/null',
+		'__NVPN_REQUEST_WRITTEN__',
+	);
+	const expectedSecretHashes = await runCommand(
+		page,
+		NVPN_SECRET_HASH_COMMAND,
+		'__NVPN_SECRETS_HASHED__',
 	);
 	await runCommand(page, 'echo user-history-survives-refresh', '__USER_HISTORY_WRITTEN__');
 	await runCommand(page, 'history -w', '__USER_HISTORY_FLUSHED__');
@@ -141,13 +178,18 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 		'__UPGRADE_CHECKED__',
 	);
 	await expect.poll(() => terminalText(page)).toContain('upgrade-clean');
-	await runCommand(
+	const upgradedNvpnState = await runCommand(
 		page,
-		"grep -F 'network_id = \"upgrade-fixture\"' /var/lib/nvpn/config.toml && grep -F 'nostr-secret-fixture' /var/lib/nvpn/.config.toml.nostr-secret-key.secret && grep -F 'pending-request-fixture' /var/lib/nvpn/.config.toml.pending-join-request.secret && grep -F 'wg-preshared-fixture' /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && grep -F 'wg-private-fixture' /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret",
+		"grep -F 'node_name = \"upgrade-fixture\"' /var/lib/nvpn/config.toml",
 		'__NVPN_STATE_UPGRADED__',
 	);
-	const upgradedNvpnState = await terminalText(page);
-	expect(upgradedNvpnState).toContain('network_id = "upgrade-fixture"');
+	expect(upgradedNvpnState.join('\n')).toContain('node_name = "upgrade-fixture"');
+	const upgradedSecretHashes = await runCommand(
+		page,
+		NVPN_SECRET_HASH_COMMAND,
+		'__NVPN_SECRETS_UPGRADED__',
+	);
+	expect(upgradedSecretHashes).toEqual(expectedSecretHashes);
 
 	page.once('dialog', (dialog) => dialog.accept());
 	await Promise.all([
@@ -161,10 +203,15 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 		'__RESET_CHECKED__',
 	);
 	await expect.poll(() => terminalText(page)).toContain('reset-clean');
-	await runCommand(
+	const resetNvpnState = await runCommand(
 		page,
-		'test ! -e /var/lib/nvpn/config.toml && test ! -e /var/lib/nvpn/.config.toml.nostr-secret-key.secret && test ! -e /var/lib/nvpn/.config.toml.pending-join-request.secret && test ! -e /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && test ! -e /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret && echo nvpn-reset-clean',
+		"for i in $(seq 1 30); do test -s /var/lib/nvpn/config.toml && " +
+			"test -s /var/lib/nvpn/.config.toml.nostr-secret-key.secret && break; sleep 1; done; " +
+			"! grep -Fq 'node_name = \"upgrade-fixture\"' /var/lib/nvpn/config.toml && " +
+			"test ! -e /var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret && " +
+			"test ! -e /var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret && " +
+			'sha256sum /var/lib/nvpn/.config.toml.nostr-secret-key.secret',
 		'__NVPN_RESET_CHECKED__',
 	);
-	await expect.poll(() => terminalText(page)).toContain('nvpn-reset-clean');
+	expect(resetNvpnState[0]).not.toEqual(expectedSecretHashes[0]);
 });

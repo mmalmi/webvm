@@ -1,12 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2.0.6 - 2026-08-19
 
 - Retry transient reliable-pubsub FIPS session setup while the authenticated
   guest remains present, so a recovered approval path does not require peer
   churn or a page reload.
-- Exercise the blocking join command without repeated daemon requests and keep
-  its approval-wait output bounded before accepting a WebVM release.
+- Exercise the blocking join command without repeated daemon requests and
+  require exactly one reachability line while awaiting approval.
+- Match the browser WSS/WebRTC record budget to native FIPS at 1,400 bytes so
+  routed WebRTC negotiation can establish the admin-to-guest approval path.
+- Upgrade the browser to FIPS TypeScript core 0.0.32 and Ethernet 0.0.31,
+  reauthenticate a restarted guest identity at its stable virtual MAC, and propagate
+  `FilterAnnounce` reachability from the Ethernet guest to upstream WSS peers,
+  allowing an approving nVPN 4.1.8 admin to route its signed roster back into
+  WebVM.
 
 ## 2.0.5 - 2026-08-18
 

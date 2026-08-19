@@ -27,6 +27,10 @@ import { runStandardApproval } from './helpers/webvm-standard-approval.js';
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
 const EXIT_ADMIN_EXCLUSIVE = process.env.NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE === '1';
+const LIVE_ROSTER_TIMEOUT_MS = Number.parseInt(
+	process.env.NVPN_WEBVM_LIVE_ROSTER_TIMEOUT_MS || '300000',
+	10,
+);
 const SERIAL_BUFFER_LIMIT = 128 * 1024;
 const GUEST_ROSTER_APPLIED =
 	"{ ! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
@@ -169,6 +173,7 @@ async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page })
 }
 test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
 	test.setTimeout(1_200_000);
+	expect(LIVE_ROSTER_TIMEOUT_MS).toBeGreaterThan(0);
 	const browserFipsLogs = [];
 	page.on('console', (message) => {
 		const text = message.text();
@@ -310,7 +315,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				await waitUntil(
 					() => guestRosterApplied(page, 'live exit signed-roster delivery'),
 					{
-						timeoutMs: 300_000,
+						timeoutMs: LIVE_ROSTER_TIMEOUT_MS,
 						intervalMs: 2_000,
 						message: 'live exit did not durably deliver the signed roster',
 					},
@@ -377,14 +382,18 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			'blocking join-request completion and quiet wait output',
 			'pid=$(cat /tmp/nvpn-join-wait.pid); ' +
 			'for i in $(seq 1 30); do ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done; ' +
-			'! kill -0 "$pid" 2>/dev/null ' +
-			"&& grep -Fqx 'Join request accepted.' /tmp/nvpn-join-wait.log " +
-			"&& count=$(grep -Ec '^(nVPN daemon status is unavailable|No active FIPS connections|" +
-			"FIPS connection active)' /tmp/nvpn-join-wait.log || true) " +
-			'&& test "$count" -le 3 ' +
-			"&& if output=$(nvpn join-request --no-qr --no-wait 2>&1); then " +
+			'if kill -0 "$pid" 2>/dev/null; then echo __WAITER_STILL_ALIVE__; ' +
+			'cat /tmp/nvpn-join-wait.log; exit 1; fi; ' +
+			"if ! grep -Fqx 'Join request accepted.' /tmp/nvpn-join-wait.log; then " +
+			'echo __ACCEPTANCE_MISSING__; cat /tmp/nvpn-join-wait.log; exit 1; fi; ' +
+			"count=$(grep -Ec '^(nVPN daemon status is unavailable|No active FIPS connections|" +
+			"FIPS connection active)' /tmp/nvpn-join-wait.log || true); " +
+			'if test "$count" -gt 1; then echo __WAIT_STATUS_SPAM__:"$count"; ' +
+			'cat /tmp/nvpn-join-wait.log; exit 1; fi; ' +
+			"if output=$(nvpn join-request --no-qr --no-wait 2>&1); then " +
 			"printf 'approved device unexpectedly received another request\\n'; exit 1; " +
-			"else printf '%s\\n' \"$output\" | grep -Fq 'already approved'; fi",
+			"elif ! printf '%s\\n' \"$output\" | grep -Fq 'already approved'; then " +
+			"printf '__UNEXPECTED_APPROVED_RESULT__\\n%s\\n' \"$output\"; exit 1; fi",
 			60_000,
 		);
 		expect(waitOutput).toEqual([]);
@@ -426,7 +435,19 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(stats.relayEvents).toBeGreaterThan(0);
 		expect(stats.flushedDeferredRelayEvents).toBeGreaterThan(0);
 		expect(stats.deferredRelayEvents).toBeLessThanOrEqual(64);
-		expect(stats.serviceErrors).toBe(0);
+		const retryableServiceErrors = new Set([
+			'delivery-unavailable',
+			'handshake-state',
+			'handshake-timeout',
+			'no-route',
+		]);
+		expect(
+			Object.keys(stats.serviceErrorClasses)
+				.filter((classification) => !retryableServiceErrors.has(classification)),
+		).toEqual([]);
+		expect(
+			Object.values(stats.serviceErrorClasses).reduce((total, count) => total + count, 0),
+		).toBe(stats.serviceErrors);
 		expect(Object.keys(stats).some((key) => /approval|stateControl/u.test(key))).toBe(false);
 	} finally {
 		if (exitServiceStopped) {

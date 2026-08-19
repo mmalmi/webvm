@@ -147,6 +147,7 @@ test('WebVM retries a transient FIPS session failure without peer churn', async 
 		logger: { warn() {} },
 	});
 	await expect.poll(() => bridge.stats.serviceErrors).toBeGreaterThan(0);
+	expect(Object.keys(bridge.stats.serviceErrorClasses)).toEqual(['no-route']);
 
 	const guest = new FipsNostrPubsubClient({
 		node: network.node(peerId),

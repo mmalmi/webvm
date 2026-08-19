@@ -134,6 +134,7 @@ test('WebVM Ethernet carries full-size native FIPS frames', () => {
 	const host = readFileSync('src/lib/webvmFipsHost.js', 'utf8');
 	const guest = readFileSync('dockerfiles/webvm-nvpn.sh', 'utf8');
 	assert.match(config, /WEBVM_FIPS_ETHERNET_MTU = 1497/u);
+	assert.match(config, /WEBVM_FIPS_UNDERLAY_MTU = 1400/u);
 	assert.match(host, /mtu: WEBVM_FIPS_ETHERNET_MTU/u);
 	assert.match(host, /discovery: true/u);
 	assert.match(host, /ETHERNET_SESSION_STALE_MS = 45_000/u);
