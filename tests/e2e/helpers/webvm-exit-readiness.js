@@ -1,9 +1,4 @@
-export async function waitForAutomaticPrivateExit({
-	page,
-	expectedExit,
-	runSerialCommand,
-	refreshExitPeerRoute,
-}) {
+export async function waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand }) {
 	const exitReady =
 		`grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
 		`&& ip -4 route show 0.0.0.0/0 | grep 'dev nvpn0' | grep -q 'mtu 1000' ` +
@@ -14,7 +9,6 @@ export async function waitForAutomaticPrivateExit({
 		`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1`;
 	const deadline = Date.now() + 300_000;
 	let lastReadinessError;
-	let nextPeerRefresh = 0;
 	while (Date.now() < deadline) {
 		try {
 			await runSerialCommand(
@@ -35,10 +29,6 @@ export async function waitForAutomaticPrivateExit({
 			return;
 		} catch (error) {
 			lastReadinessError = error;
-			if (refreshExitPeerRoute && Date.now() >= nextPeerRefresh) {
-				await refreshExitPeerRoute();
-				nextPeerRefresh = Date.now() + 15_000;
-			}
 			await new Promise((resolve) => setTimeout(resolve, 2_000));
 		}
 	}
