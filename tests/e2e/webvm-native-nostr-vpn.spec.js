@@ -131,17 +131,37 @@ async function guestApprovalPathReady(page) {
 	}
 }
 
-async function refreshBrowserPeerRoute(page, peer) {
-	await page.evaluate(async (expectedPeer) => {
+async function ensureBrowserPeerRoute(page, peer, { restartExisting = false } = {}) {
+	return page.evaluate(async ({ expectedPeer, restartExistingPeer }) => {
 		const host = globalThis.irisWebvmV86?.fipsHost;
 		const transport = host?.webrtc;
 		const connections = transport?.conns instanceof Map ? [...transport.conns.keys()] : [];
-		for (const connection of connections) {
-			if (!connection.toLowerCase().endsWith(expectedPeer)) continue;
+		const connection = connections.find((candidate) => (
+			candidate.toLowerCase().endsWith(expectedPeer)
+		));
+		if (connection && restartExistingPeer) {
 			await transport.handlePeerRestart(connection);
+		} else if (!connection) {
+			const adverts = transport?.advertCache?.values
+				? [...transport.advertCache.values()]
+				: [];
+			const advertisedAddress = adverts
+				.map((advert) => advert?.peer?.remoteAddr?.addr)
+				.find((candidate) => (
+					typeof candidate === 'string'
+						&& candidate.toLowerCase().endsWith(expectedPeer)
+				));
+			if (advertisedAddress) {
+				try {
+					await transport.connect({ transport: 'webrtc', addr: advertisedAddress });
+				} catch {
+					// The bounded guest readiness loop will retry after fresh discovery.
+				}
+			}
 		}
 		host?.pubsub?.refreshPeers?.();
-	}, peer);
+		return Boolean(connection);
+	}, { expectedPeer: peer, restartExistingPeer: restartExisting });
 }
 
 async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page }) {
@@ -328,7 +348,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					() => exitAdminStatus(exitAdmin.binary, exitAdmin.config).daemon?.running === true,
 					{ timeoutMs: 60_000, intervalMs: 1_000, message: 'exit admin did not restart' },
 				);
-				await refreshBrowserPeerRoute(page, expectedExit);
+				await ensureBrowserPeerRoute(page, expectedExit, { restartExisting: true });
 			} else {
 				approvalEvents = await runStandardApproval({
 					fixture,
@@ -385,7 +405,12 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		expect(approved).toEqual([]);
 
 		if (exitAdmin) {
-			await waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand });
+			await waitForAutomaticPrivateExit({
+				page,
+				expectedExit,
+				runSerialCommand,
+				refreshExitPeerRoute: () => ensureBrowserPeerRoute(page, expectedExit),
+			});
 			try {
 				await waitForPrivateExitInternet({ page, runSerialCommand });
 			} catch (error) {
