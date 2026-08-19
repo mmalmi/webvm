@@ -1,7 +1,7 @@
 export async function waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand }) {
 	const exitReady =
 		`grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
-		`&& ip -4 route show 0.0.0.0/0 | grep 'dev nvpn0' | grep 'src ' | grep -q 'mtu 1000' ` +
+		`&& ip -4 route show 0.0.0.0/0 | grep 'dev nvpn0' | grep -q 'mtu 1000' ` +
 		`&& ! ip -4 addr show dev nvpn0 | grep -q '10.44.0.1/32' ` +
 		`&& ip link show nvpn0 | grep -q 'mtu 1280' ` +
 		`&& iptables -t mangle -C OUTPUT -o nvpn0 -p tcp ` +

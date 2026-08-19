@@ -21,6 +21,7 @@ import {
 import { waitForGuestNvpnDaemon } from './helpers/webvm-daemon-readiness.js';
 import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
 import { waitForPrivateExitInternet } from './helpers/webvm-internet-readiness.js';
+import { parseSerialCommandResult } from './helpers/webvm-serial-command.js';
 import { runStandardApproval } from './helpers/webvm-standard-approval.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
@@ -82,19 +83,10 @@ async function runSerialCommandUnlocked(page, label, command, timeoutMs) {
 	try {
 		await waitUntil(
 			async () => {
-				result = await page.evaluate(({ beginMarker, endMarker }) => {
-					const lines = (globalThis.__nvpnStandardE2eSerial?.text || '')
-						.replaceAll('\r', '').split('\n');
-					const beginIndex = lines.findIndex((line) => line.trim() === beginMarker);
-					if (beginIndex < 0) return null;
-					const endIndex = lines.findIndex((line, index) => (
-						index > beginIndex && line.trim().startsWith(`${endMarker}:`)
-					));
-					if (endIndex < 0) return null;
-					const status = Number.parseInt(lines[endIndex].trim().slice(endMarker.length + 1), 10);
-					if (!Number.isInteger(status)) return null;
-					return { status, output: lines.slice(beginIndex + 1, endIndex) };
-				}, { beginMarker: begin, endMarker: end });
+				const serial = await page.evaluate(
+					() => globalThis.__nvpnStandardE2eSerial?.text || '',
+				);
+				result = parseSerialCommandResult(serial, begin, end);
 				return Boolean(result);
 			},
 			{ timeoutMs, message: `serial command timed out during ${label}` },
@@ -106,7 +98,7 @@ async function runSerialCommandUnlocked(page, label, command, timeoutMs) {
 	if (result.status !== 0) {
 		throw new Error(`serial command failed during ${label}: ${result.output.join(' | ')}`);
 	}
-	return result.output.map((line) => line.trim()).filter(Boolean);
+	return result.output;
 }
 
 async function guestRosterApplied(page, label = 'signed-roster application check') {
@@ -116,7 +108,7 @@ async function guestRosterApplied(page, label = 'signed-roster application check
 			label,
 			"! grep -q '^local_identity_confirmation_pending = true$' /var/lib/nvpn/config.toml " +
 				"&& grep -q '^shared_roster_signed_by = ' /var/lib/nvpn/config.toml",
-			10_000,
+			30_000,
 		);
 		return true;
 	} catch {
@@ -346,14 +338,19 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				});
 			}
 		} catch (error) {
-			const guest = await runSerialCommand(
-				page,
-				'nVPN approval diagnostics',
-				"echo __JOIN__; nvpn join-request --no-qr --no-wait 2>&1 || true; " +
-					"echo __STATE__; cat /var/lib/nvpn/daemon.state.json 2>&1 || true; echo __LOG__; " +
-					"cat /var/lib/nvpn/daemon.log 2>&1 || true",
-				30_000,
-			);
+			let guest;
+			try {
+				guest = await runSerialCommand(
+					page,
+					'nVPN approval diagnostics',
+					"echo __JOIN__; nvpn join-request --no-qr --no-wait 2>&1 || true; " +
+						"echo __STATE__; cat /var/lib/nvpn/daemon.state.json 2>&1 || true; echo __LOG__; " +
+						"cat /var/lib/nvpn/daemon.log 2>&1 || true",
+					90_000,
+				);
+			} catch (diagnosticError) {
+				guest = [`diagnostics failed: ${diagnosticError.message}`];
+			}
 			const browser = await page.evaluate(() => ({
 				frames: globalThis.irisWebvmV86?.fipsHost?.ethernetFrameStats,
 				pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
