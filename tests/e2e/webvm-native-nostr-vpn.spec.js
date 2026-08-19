@@ -441,9 +441,16 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			'handshake-timeout',
 			'no-route',
 		]);
+		const unexpectedServiceErrors = Object.keys(stats.serviceErrorClasses)
+			.filter((classification) => !retryableServiceErrors.has(classification));
 		expect(
-			Object.keys(stats.serviceErrorClasses)
-				.filter((classification) => !retryableServiceErrors.has(classification)),
+			unexpectedServiceErrors,
+			`unexpected WebVM pubsub error telemetry: ${JSON.stringify({
+				classes: stats.serviceErrorClasses,
+				operations: stats.serviceErrorOperations,
+				lastError: stats.lastServiceError,
+				lastMessage: stats.lastServiceErrorMessage,
+			})}`,
 		).toEqual([]);
 		expect(
 			Object.values(stats.serviceErrorClasses).reduce((total, count) => total + count, 0),

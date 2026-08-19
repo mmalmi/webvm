@@ -17,6 +17,16 @@
 - Re-resolve a live transit session after its learned browser next hop disappears,
   allowing paired exit traffic to heal onto another authenticated mesh path
   without restarting nVPN or re-pairing.
+- Upgrade the browser to FIPS TypeScript core 0.0.34 and retain the first
+  authenticated direct record when it legitimately arrives before the routed
+  final handshake message, so native pubsub approval survives carrier
+  reordering between the guest and browser.
+- Upgrade the browser bridge to `nostr-pubsub` 0.5.6, including its latest
+  verification boundary and idempotent cleanup for a simultaneous TCP/FIPS
+  stream that the remote guest already closed.
+- Upgrade the browser to FIPS TypeScript core 0.0.35 and remove a displaced
+  guest identity from WebVM admission state before accepting the replacement
+  identity at the VM's stable Ethernet address.
 - Quiet BusyBox history persistence at each interactive prompt, preventing the
   full command history from flooding the console and obscuring pairing updates.
 

@@ -8,11 +8,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APPROVED_PACKAGES = [
 	{
 		name: '@fips/core',
-		version: '0.0.33',
-		path: 'vendor/fips/fips-core-0.0.33.tgz',
-		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.33/fips-core-0.0.33.tgz',
-		sha256: '269cfe97fa8171502b3d578a8f8664d9dc0a518537589cd4dca0ac5ee9781d1b',
-		sha512: '5miIj8/8YGcbtgsDosNZvIA8DpBgGZSGCAOtOUS1S8OGRNH0VN3h60m0wvzdWVJgLKMJzEiYL//R1JWnF72DFA==',
+		version: '0.0.35',
+		path: 'vendor/fips/fips-core-0.0.35.tgz',
+		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.35/fips-core-0.0.35.tgz',
+		sha256: '3feac617f0a3ab716cd0522dcf0199383e41255465ee344018abf05e85aff8f4',
+		sha512: 'uDoUMW9eNwVDMOkVi/Ud5P/lqkkdR7W9jnzPucJvMDN7uIPb/hSpF3jRLdGKbyRmhcTUruv3+vp4koovmPDmWg==',
 	},
 	{
 		name: '@fips/transport-ethernet',
@@ -40,11 +40,11 @@ const APPROVED_PACKAGES = [
 	},
 	{
 		name: 'nostr-pubsub',
-		version: '0.5.1',
-		path: 'vendor/nostr-pubsub-0.5.1.tgz',
-		url: 'https://github.com/mmalmi/nostr-pubsub/releases/download/nostr-pubsub-ts-v0.5.1/nostr-pubsub-0.5.1.tgz',
-		sha256: '48ea1c1cb37db84a5ba9efbb181f6ccd764ddaef42c39438995b6213aff1bd67',
-		sha512: '8Du8STeYMT98zz00lo3uoETYeWpvVGZO3n0Xi9pZycXWPMxCQP1FwRgl0mrxTMT5KK1xOw4pMnpSGmMeVOidag==',
+		version: '0.5.6',
+		path: 'vendor/nostr-pubsub-0.5.6.tgz',
+		url: 'https://github.com/mmalmi/nostr-pubsub/releases/download/nostr-pubsub-ts-v0.5.6/nostr-pubsub-0.5.6.tgz',
+		sha256: 'bb6393efc49950b65c771e06474bb7cdd8519cdb67d422997d269dbd4ca48a44',
+		sha512: '4IcGvXxchQ4P/NhATMiVuVXKfmLg6kvsq9lNZlIyOvqcFwzEQepiCvlErl6+11SHrH+hb0MpyMLcemWs9IkFMQ==',
 	},
 ];
 const APPROVED_REMOTE_PACKAGES = [
