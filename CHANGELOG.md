@@ -29,6 +29,9 @@
   identity at the VM's stable Ethernet address.
 - Quiet BusyBox history persistence at each interactive prompt, preventing the
   full command history from flooding the console and obscuring pairing updates.
+- Keep the restored shell in its concise, bounded startup state until nVPN has
+  opened both DNS and its join-control socket, so an immediately entered
+  approval command cannot race normal daemon startup.
 
 ## 2.0.5 - 2026-08-18
 

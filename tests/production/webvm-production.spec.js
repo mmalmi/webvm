@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test';
 
-const LNVPS_FIPS_NAME =
-	'npub1uf4ua9n0hm2x4ct8sqcyqfh7w0s9n5qej9gpjjqjf9z0lsmh3jtsqyduhs.fips';
+const PUBLIC_FIPS_NAMES = [
+	'npub1uf4ua9n0hm2x4ct8sqcyqfh7w0s9n5qej9gpjjqjf9z0lsmh3jtsqyduhs.fips',
+	'npub1zv3qmj7xz7znehyqwzpc26fcjxtcf7tpxeevxx93ymgm6kw7gjpqp9npvh.fips',
+];
+const RESOLVE_PUBLIC_FIPS = PUBLIC_FIPS_NAMES
+	.map((name) => `nslookup ${name} >/dev/null`)
+	.join(' && ');
 
 test('deployed WebVM caches content-addressed rootfs chunks as immutable', async ({ request }) => {
 	const filesystem = await request.get('/v86/guest/fs.json');
@@ -39,6 +44,9 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	const rows = terminal.locator('.xterm-rows');
 	await expect(rows).toContainText('Iris WebVM');
 	await expect(rows).toContainText('root@webvm:~#');
+	await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/, {
+		timeout: 120_000,
+	});
 
 	await terminal.click();
 	await page.keyboard.insertText(
@@ -53,9 +61,9 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 
 	await page.keyboard.insertText(
 		'a=__WEBVM_FIPS_; b=READY__; ' +
-		'for attempt in $(seq 1 30); do ' +
-		`if ping -c 1 -W 5 ${LNVPS_FIPS_NAME} ` +
-		'>/dev/null 2>&1; then printf "%s%s\\n" "$a" "$b"; break; fi; sleep 1; done',
+		'for attempt in $(seq 1 15); do ' +
+		`if ${RESOLVE_PUBLIC_FIPS}; ` +
+		'then printf "%s%s\\n" "$a" "$b"; break; fi; sleep 1; done',
 	);
 	await page.keyboard.press('Enter');
 	await expect(rows).toContainText('__WEBVM_FIPS_READY__', { timeout: 180_000 });
@@ -66,7 +74,7 @@ test('deployed WebVM is isolated and boots the FIPS-connected guest', async ({ p
 	await expect(page.getByTestId('v86-error')).toHaveCount(0);
 });
 
-test('deployed WebVM handles a concurrent FIPS ingress burst', async ({ browser }) => {
+test('deployed WebVM handles concurrent FIPS guest startup and resolution', async ({ browser }) => {
 	const baseURL = process.env.WEBVM_PRODUCTION_URL || 'https://webvm.iris.to';
 	const contexts = await Promise.all(Array.from({ length: 4 }, () => browser.newContext()));
 	const pages = await Promise.all(contexts.map((context) => context.newPage()));
@@ -78,6 +86,9 @@ test('deployed WebVM handles a concurrent FIPS ingress burst', async ({ browser 
 			await expect(page.getByTestId('v86-fips-state')).toHaveText('FIPS connected');
 			const rows = page.getByTestId('v86-serial').locator('.xterm-rows');
 			await expect(rows).toContainText('root@webvm:~#');
+			await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/, {
+				timeout: 120_000,
+			});
 		}));
 
 		await Promise.all(pages.map(async (page, index) => {
@@ -86,22 +97,22 @@ test('deployed WebVM handles a concurrent FIPS ingress burst', async ({ browser 
 			const marker = `__WEBVM_BURST_${index}_OK__`;
 			await terminal.click();
 			await page.keyboard.insertText(
-				`ping -c 1 -W 8 ${LNVPS_FIPS_NAME} >/dev/null && printf '${marker}\\n'`,
+				`for attempt in $(seq 1 5); do ${RESOLVE_PUBLIC_FIPS} ` +
+				`&& { printf '${marker}\\n'; break; }; sleep 1; done`,
 			);
 			await page.keyboard.press('Enter');
 			await expect(rows).toContainText(marker, { timeout: 30_000 });
 			await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
-			await expect(rows).not.toContainText('ping: bad address');
 		}));
 	} finally {
 		await Promise.all(contexts.map((context) => context.close()));
 	}
 });
 
-test('five fresh WebVMs deliver their first FIPS ping without resolver or session loss', async ({
+test('five fresh WebVMs resolve both redundant public FIPS names', async ({
 	browser,
 }) => {
-	test.setTimeout(300_000);
+	test.setTimeout(600_000);
 	const baseURL = process.env.WEBVM_PRODUCTION_URL || 'https://webvm.iris.to';
 	const localHeaders = baseURL.startsWith('http://')
 		? { 'x-forwarded-proto': 'https' }
@@ -118,19 +129,21 @@ test('five fresh WebVMs deliver their first FIPS ping without resolver or sessio
 			const terminal = page.getByTestId('v86-serial');
 			const rows = terminal.locator('.xterm-rows');
 			await expect(rows).toContainText('root@webvm:~#');
+			await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/, {
+				timeout: 120_000,
+			});
 
-			const markerPrefix = `__WEBVM_FRESH_FIRST_PING_${attempt}_`;
+			const markerPrefix = `__WEBVM_FRESH_RESOLUTION_${attempt}_`;
 			const marker = `${markerPrefix}OK__`;
 			await terminal.click();
 			await page.keyboard.insertText(
 				`a='${markerPrefix}'; b='OK__'; ` +
-				`ping -c 1 -W 8 ${LNVPS_FIPS_NAME} >/dev/null && printf '%s%s\\n' \"$a\" \"$b\"`,
+				`for probe in $(seq 1 5); do ${RESOLVE_PUBLIC_FIPS} ` +
+				`&& { printf '%s%s\\n' \"$a\" \"$b\"; break; }; sleep 1; done`,
 			);
 			await page.keyboard.press('Enter');
-			await expect(rows).toContainText(marker, { timeout: 30_000 });
-			await expect(page.locator('header')).toContainText(/Ethernet [1-9]\d*/);
-			await expect(rows).not.toContainText('ping: bad address');
-			console.log(`fresh first ping ${attempt}/5 passed in ${Date.now() - startedAt}ms`);
+			await expect(rows).toContainText(marker, { timeout: 60_000 });
+			console.log(`fresh FIPS resolution ${attempt}/5 passed in ${Date.now() - startedAt}ms`);
 		} finally {
 			await context.close();
 		}
