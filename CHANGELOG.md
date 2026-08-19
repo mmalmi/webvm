@@ -9,11 +9,14 @@
   require exactly one reachability line while awaiting approval.
 - Match the browser WSS/WebRTC record budget to native FIPS at 1,400 bytes so
   routed WebRTC negotiation can establish the admin-to-guest approval path.
-- Upgrade the browser to FIPS TypeScript core 0.0.32 and Ethernet 0.0.31,
+- Upgrade the browser to FIPS TypeScript core 0.0.33 and Ethernet 0.0.31,
   reauthenticate a restarted guest identity at its stable virtual MAC, and propagate
   `FilterAnnounce` reachability from the Ethernet guest to upstream WSS peers,
   allowing an approving nVPN 4.1.8 admin to route its signed roster back into
   WebVM.
+- Re-resolve a live transit session after its learned browser next hop disappears,
+  allowing paired exit traffic to heal onto another authenticated mesh path
+  without restarting nVPN or re-pairing.
 
 ## 2.0.5 - 2026-08-18
 
