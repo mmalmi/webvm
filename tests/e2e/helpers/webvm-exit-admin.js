@@ -60,7 +60,7 @@ export async function prepareLiveExitApproval({ fixture }) {
 		`nostr-vpn-app-core = { path = ${JSON.stringify(path.join(
 			fixture.repository,
 			'crates/nostr-vpn-app-core',
-		))} }`,
+		))}, default-features = false }`,
 		'',
 	].join('\n'));
 	writeChanged(
