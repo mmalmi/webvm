@@ -8,6 +8,8 @@
   with bounded probe timeouts and fewer redundant retries.
 - Resolve native FIPS package aliases when validating paired nVPN fixtures,
   and allow explicit clean release candidates before publication.
+- Fail guest snapshot capture if its preview port is occupied, preventing
+  accidental snapshots from another server and simplifying preview cleanup.
 
 ## 2.0.6 - 2026-08-19
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import { chromium } from '@playwright/test';
+import { preview as startPreview } from 'vite';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outputDirectory = path.join(root, 'custom-disk-images/v86-guest/state');
@@ -35,29 +36,13 @@ function run(command, args, options = {}) {
 	});
 }
 
-async function waitForServer(url, child) {
-	let lastError;
-	for (let attempt = 0; attempt < 100; attempt += 1) {
-		if (child.exitCode !== null) throw new Error('WebVM preview exited before snapshot capture');
-		try {
-			const response = await fetch(url);
-			if (response.ok) return;
-		} catch (error) {
-			lastError = error;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 100));
-	}
-	throw new Error(`WebVM preview did not start: ${lastError || 'timeout'}`);
-}
-
 async function captureState(downloadPath) {
-	const preview = spawn('npm', ['run', 'preview', '--', '--port', String(port)], {
-		cwd: root,
-		stdio: 'inherit',
+	const preview = await startPreview({
+		root,
+		preview: { host: '127.0.0.1', port, strictPort: true },
 	});
 	let browser;
 	try {
-		await waitForServer(`${baseUrl}/v86`, preview);
 		browser = await chromium.launch({ headless: true });
 		const context = await browser.newContext({ acceptDownloads: true });
 		const page = await context.newPage();
@@ -121,10 +106,7 @@ async function captureState(downloadPath) {
 		await download.saveAs(downloadPath);
 	} finally {
 		await browser?.close();
-		if (preview.exitCode === null) {
-			preview.kill('SIGTERM');
-			await new Promise((resolve) => preview.once('close', resolve));
-		}
+		await preview.close();
 	}
 }
 
