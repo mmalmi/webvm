@@ -1,10 +1,10 @@
 # Changelog
 
-## 2.0.7 - 2026-09-05
+## 2.0.7 - 2026-09-06
 
-- Upgrade browser FIPS core to 0.0.38 for faster replay protection, strict peer
-  keys, and matching Rust nonce-exhaustion and discovery-loop handling,
-  without changing the wire protocol.
+- Upgrade browser FIPS core to 0.0.41 for faster replay protection, matching
+  Rust timing and delivery reports, and confirmed carrier changes that preserve
+  traffic through key rotation, without changing the wire protocol.
 - Select a reachable private exit after pairing and retry a failed daemon
   reload before recording the automatic choice. Preserve later manual choices.
 - Verify public HTTP and certificate-checked HTTPS alongside ICMP and DNS,
