@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -66,6 +66,21 @@ test('native gate attests an explicit clean public source and registry FIPS rele
 		assert.equal(facts.fipsEndpoint.version, '0.4.4');
 		assert.match(facts.nvpnSha256, /^[0-9a-f]{64}$/u);
 		assert.equal(facts.sourceMode, 'published');
+
+		// An executor can run the exact attested binary in a VM without replacing its hash.
+		const execution = mkdtempSync(path.join(tmpdir(), 'iris-webvm-native-executor-'));
+		try {
+			const executor = path.join(execution, 'executor');
+			const argumentsFile = path.join(execution, 'arguments');
+			writeFileSync(executor, `#!/bin/sh\nprintf '%s\\n' "$@" > '${argumentsFile}'\nexec "$@"\n`);
+			chmodSync(executor, 0o755);
+			const remoteFacts = inspectNativeFixture({ ...env, NVPN_WEBVM_NATIVE_EXECUTOR: executor });
+			assert.equal(remoteFacts.nvpnSha256, facts.nvpnSha256);
+			assert.equal(remoteFacts.nvpnVersion, facts.nvpnVersion);
+			assert.deepEqual(readFileSync(argumentsFile, 'utf8').trim().split('\n'), [facts.binary, '--version']);
+		} finally {
+			rmSync(execution, { recursive: true, force: true });
+		}
 
 		run('git', ['update-ref', '-d', 'refs/remotes/github/master'], fixture.repository);
 		assert.throws(() => inspectNativeFixture(env), /canonical public remote/u);

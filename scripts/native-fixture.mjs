@@ -27,6 +27,13 @@ function regularFile(value, name, { executable = false } = {}) {
 	return realpathSync(file);
 }
 
+export function nativeCommand(binary, args, env = process.env) {
+	const executor = env.NVPN_WEBVM_NATIVE_EXECUTOR?.trim();
+	return executor
+		? [regularFile(executor, 'NVPN_WEBVM_NATIVE_EXECUTOR', { executable: true }), [binary, ...args]]
+		: [binary, args];
+}
+
 function section(source, name) {
 	const marker = `[${name}]\n`;
 	const start = source.indexOf(marker);
@@ -123,7 +130,8 @@ export function inspectNativeFixture(env = process.env) {
 	if (fipsCore.version !== expectedFipsVersion || fipsEndpoint.version !== expectedFipsVersion) {
 		throw new Error('Native Cargo.lock does not resolve the expected FIPS release');
 	}
-	const nvpnVersion = run(binary, ['--version']).match(/^nvpn\s+([^\s]+)$/u)?.[1];
+	const nvpnVersion = run(...nativeCommand(binary, ['--version'], env))
+		.match(/^nvpn\s+([^\s]+)$/u)?.[1];
 	if (nvpnVersion !== workspaceVersion) {
 		throw new Error(`nVPN binary is ${nvpnVersion || 'unknown'}, expected ${workspaceVersion}`);
 	}

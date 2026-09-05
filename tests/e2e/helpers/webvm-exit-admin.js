@@ -14,6 +14,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { nip19 } from 'nostr-tools';
+import { nativeCommand } from '../../../scripts/native-fixture.mjs';
 
 const LAUNCHD_LABEL = 'system/to.nostrvpn.nvpn';
 const LAUNCHD_PLIST = '/Library/LaunchDaemons/to.nostrvpn.nvpn.plist';
@@ -96,7 +97,7 @@ export async function prepareLiveExitApproval({ fixture }) {
 }
 
 export function stageLiveExitApproval({ approvalBinary, nvpnBinary, request, config }) {
-	return execFileSync(approvalBinary, [config, request, nvpnBinary], {
+	return execFileSync(...nativeCommand(approvalBinary, [config, request, nvpnBinary]), {
 		encoding: 'utf8',
 		timeout: 120_000,
 	}).trim();
