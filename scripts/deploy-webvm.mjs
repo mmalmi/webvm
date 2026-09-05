@@ -119,6 +119,9 @@ async function main() {
 		console.log(JSON.stringify(config, null, 2));
 		return;
 	}
+	if ((process.env.NVPN_WEBVM_NATIVE_SOURCE_MODE || 'published') !== 'published') {
+		throw new Error('WebVM deployment requires published native source provenance');
+	}
 
 	try {
 		const installStatus = await run('npm', ['ci'], appDir);

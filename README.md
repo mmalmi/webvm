@@ -61,7 +61,7 @@ test against the deployed WebVM instead of the local preview.
 For a local release candidate, set `NVPN_WEBVM_NATIVE_SOURCE_MODE=candidate`.
 This accepts an unpublished commit while still requiring a clean repository,
 the exact source commit, matching binary version, and checksummed registry FIPS dependencies.
-Published-source verification remains the default.
+Published-source verification remains the default and is required for deployment.
 
 ## Guest image and state
 

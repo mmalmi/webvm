@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -14,6 +14,16 @@ test('deployment always starts from the frozen lockfile', () => {
 	assert.match(output, /Install frozen dependencies: npm ci/u);
 	assert.ok(output.indexOf('npm ci') < output.indexOf('npm run test:release'));
 	assert.match(output, /npx wrangler@4\.112\.0 deploy/u);
+});
+
+test('deployment rejects candidate provenance before installing or publishing', () => {
+	const result = spawnSync(process.execPath, ['scripts/deploy-webvm.mjs'], {
+		env: { ...process.env, NVPN_WEBVM_NATIVE_SOURCE_MODE: 'candidate' },
+		encoding: 'utf8',
+	});
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /deployment requires published native source provenance/u);
+	assert.equal(result.stdout, '');
 });
 
 test('WebVM publishes the Iris Sites WebVM icon from the application shell', () => {
