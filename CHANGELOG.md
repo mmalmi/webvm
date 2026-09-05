@@ -12,6 +12,8 @@
   and allow explicit clean release candidates before publication.
 - Fail guest snapshot capture if its preview port is occupied, preventing
   accidental snapshots from another server and simplifying preview cleanup.
+- Build the native approval helper before starting the guest, reusing pinned
+  dependencies and keeping compilation outside the pairing deadline.
 
 ## 2.0.6 - 2026-08-19
 

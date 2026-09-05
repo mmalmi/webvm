@@ -9,6 +9,7 @@ import { inspectNativeFixture } from '../../scripts/native-fixture.mjs';
 import {
 	exitAdminStatus,
 	normalizedPubkey,
+	prepareLiveExitApproval,
 	recipientFromJoinRequest,
 	removeNewOutboxEntries,
 	runExitAdmin,
@@ -205,9 +206,11 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		exitOutboxBefore = snapshotOutbox(exitAdmin.config);
 		if (EXIT_ADMIN_EXCLUSIVE) stageExitAdminConfig(exitAdmin.config, dataDir);
 	}
-	await page.goto('/v86?webvm-e2e=1');
-	await attachSerial(page);
 	try {
+		const approvalBinary = exitAdmin && !EXIT_ADMIN_EXCLUSIVE
+			? await prepareLiveExitApproval({ fixture }) : null;
+		await page.goto('/v86?webvm-e2e=1');
+		await attachSerial(page);
 		await waitUntil(
 			() => page.evaluate(() => globalThis.irisWebvmV86?.state?.().terminalReady === true),
 			{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
@@ -312,10 +315,10 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			} else if (exitAdmin) {
 				joinedRecipient = recipientFromJoinRequest(request);
 				stageLiveExitApproval({
+					approvalBinary,
 					fixture,
 					request,
 					config: exitAdmin.config,
-					dataDir,
 				});
 				runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
 				await waitUntil(

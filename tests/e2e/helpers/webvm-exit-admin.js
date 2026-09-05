@@ -1,13 +1,17 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import {
 	copyFileSync,
+	existsSync,
 	mkdirSync,
+	readFileSync,
 	readdirSync,
 	rmdirSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { nip19 } from 'nostr-tools';
 
@@ -33,15 +37,23 @@ export function stageExitAdminConfig(sourceConfig, dataDir) {
 	}
 }
 
-export function stageLiveExitApproval({ fixture, request, config, dataDir }) {
-	const crate = path.join(dataDir, 'live-exit-approval');
+export async function prepareLiveExitApproval({ fixture }) {
+	const target = path.resolve(fixture.repository, process.env.CARGO_TARGET_DIR || 'target');
+	const crate = path.join(target, 'webvm-live-exit-approval', fixture.sourceCommit);
 	const source = path.join(crate, 'src');
 	mkdirSync(source, { recursive: true });
-	writeFileSync(path.join(crate, 'Cargo.toml'), [
+	const writeChanged = (file, contents) => {
+		if (!existsSync(file) || readFileSync(file, 'utf8') !== contents) {
+			writeFileSync(file, contents, { mode: 0o600 });
+		}
+	};
+	writeChanged(path.join(crate, 'Cargo.toml'), [
 		'[package]',
 		'name = "iris-webvm-live-exit-approval"',
 		'version = "0.0.0"',
 		'edition = "2024"',
+		'',
+		'[workspace]',
 		'',
 		'[dependencies]',
 		`nostr-vpn-app-core = { path = ${JSON.stringify(path.join(
@@ -49,18 +61,42 @@ export function stageLiveExitApproval({ fixture, request, config, dataDir }) {
 			'crates/nostr-vpn-app-core',
 		))} }`,
 		'',
-	].join('\n'), { mode: 0o600 });
-	copyFileSync(
-		path.resolve('tests/fixtures/stage-live-join-approval.rs'),
+	].join('\n'));
+	writeChanged(
 		path.join(source, 'main.rs'),
+		readFileSync(path.resolve('tests/fixtures/stage-live-join-approval.rs'), 'utf8'),
 	);
-	return execFileSync(process.env.CARGO || 'cargo', [
-		'run', '--quiet', '--manifest-path', path.join(crate, 'Cargo.toml'), '--',
-		config, request, fixture.binary,
+	// Reuse the verified native dependency versions instead of resolving a fresh graph.
+	const lock = path.join(crate, 'Cargo.lock');
+	if (!existsSync(lock)) copyFileSync(path.join(fixture.repository, 'Cargo.lock'), lock);
+	const { stdout } = await promisify(execFile)(process.env.CARGO || 'cargo', [
+		'build', '--quiet', '--message-format=json-render-diagnostics',
+		'--target-dir', target,
+		'--manifest-path', path.join(crate, 'Cargo.toml'),
 	], {
 		cwd: fixture.repository,
 		encoding: 'utf8',
 		env: { ...process.env, RUSTC_WRAPPER: '' },
+		timeout: 600_000,
+		maxBuffer: 16 * 1024 * 1024,
+	});
+	const artifact = stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+		.find((entry) => entry.reason === 'compiler-artifact'
+			&& entry.target?.name === 'iris-webvm-live-exit-approval'
+			&& entry.target.kind.includes('bin') && entry.executable);
+	const metadata = artifact && statSync(artifact.executable);
+	if (!metadata?.isFile() || (metadata.mode & 0o111) === 0) {
+		throw new Error('Cargo did not produce an executable live-exit approval helper');
+	}
+	const prepared = path.join(crate, 'bin', path.basename(artifact.executable));
+	mkdirSync(path.dirname(prepared), { recursive: true });
+	copyFileSync(artifact.executable, prepared);
+	return prepared;
+}
+
+export function stageLiveExitApproval({ approvalBinary, fixture, request, config }) {
+	return execFileSync(approvalBinary, [config, request, fixture.binary], {
+		encoding: 'utf8',
 		timeout: 120_000,
 	}).trim();
 }
