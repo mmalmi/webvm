@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,6 +9,7 @@ import {
 	gitRecord,
 	treeRecord,
 } from './v86-guest-manifest.mjs';
+import { replaceGuestNvpn } from './v86-guest-files.mjs';
 
 const appDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const guestDirectory = path.join(appDirectory, 'custom-disk-images/v86-guest');
@@ -44,39 +45,13 @@ if (!description.includes('ELF 32-bit LSB')
 	throw new Error(`nVPN is not a static i386 ELF binary: ${description}`);
 }
 
-const binaryRecord = await fileRecord(binary);
-const blobName = `${binaryRecord.sha256.slice(0, 8)}.bin.zst`;
-const blobPath = path.join(rootfsDirectory, blobName);
-const temporaryBlobPath = `${blobPath}.${process.pid}.tmp`;
-execFileSync('zstd', ['--quiet', '-19', '--force', binary, '-o', temporaryBlobPath]);
-await rename(temporaryBlobPath, blobPath);
-
 const filesystemPath = path.join(guestDirectory, 'fs.json');
 const filesystem = JSON.parse(await readFile(filesystemPath, 'utf8'));
-const matches = [];
-function walk(entries, parent = '') {
-	for (const entry of entries) {
-		const entryPath = `${parent}/${entry[0]}`;
-		if (entryPath === '/usr/local/bin/nvpn') matches.push(entry);
-		if (Array.isArray(entry[6])) walk(entry[6], entryPath);
-	}
-}
-walk(filesystem.fsroot);
-if (matches.length !== 1) {
-	throw new Error(`Expected one /usr/local/bin/nvpn entry, found ${matches.length}`);
-}
-const entry = matches[0];
-const previousBlobName = entry[6];
-entry[1] = binaryRecord.bytes;
-entry[2] = Math.floor(Date.now() / 1_000);
-entry[6] = blobName;
+const binaryRecord = await replaceGuestNvpn(filesystem, rootfsDirectory, await readFile(binary));
 
 const temporaryFilesystemPath = `${filesystemPath}.${process.pid}.tmp`;
 await writeFile(temporaryFilesystemPath, JSON.stringify(filesystem), { mode: 0o644 });
 await rename(temporaryFilesystemPath, filesystemPath);
-if (previousBlobName !== blobName) {
-	await rm(path.join(rootfsDirectory, previousBlobName), { force: true });
-}
 
 const manifestPath = path.join(guestDirectory, 'manifest.json');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -92,4 +67,4 @@ const temporaryManifestPath = `${manifestPath}.${process.pid}.tmp`;
 await writeFile(temporaryManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 });
 await rename(temporaryManifestPath, manifestPath);
 
-console.log(`${blobName} ${binaryRecord.bytes} bytes`);
+console.log(`${binaryRecord.sha256.slice(0, 8)}.bin.zst ${binaryRecord.bytes} bytes`);
