@@ -428,16 +428,15 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 						"iptables -t mangle -L OUTPUT -n -v 2>&1 || true; echo __LOG__; " +
 						"tail -n 200 /var/lib/nvpn/daemon.log 2>&1 || true; true",
 					30_000,
-				);
+				).catch(() => ['Guest diagnostics unavailable.']);
 				const browser = await page.evaluate(() => ({
 					frames: globalThis.irisWebvmV86?.fipsHost?.ethernetFrameStats,
 					pubsub: globalThis.irisWebvmV86?.fipsHost?.pubsub?.stats,
 					state: globalThis.irisWebvmV86?.state?.(),
-				}));
-				throw new Error(
-					`${error.message}\nGuest:\n${guest.join('\n')}` +
-						`\nBrowser:\n${JSON.stringify(browser)}`,
-				);
+				})).catch(() => ({ error: 'Browser diagnostics unavailable.' }));
+				error.message += `\nGuest:\n${guest.join('\n')}` +
+					`\nBrowser:\n${JSON.stringify(browser)}`;
+				throw error;
 			}
 		}
 
