@@ -2,7 +2,10 @@
 
 ## 2.0.7 - 2026-09-06
 
-- Upgrade browser FIPS core to 0.0.41 for faster replay protection, matching
+- Warm coordinates when browser traffic changes transit paths and accept coordinate
+  warmup from native peers without repeating session setup.
+
+- Upgrade browser FIPS core to 0.0.42 for faster replay protection, matching
   Rust timing and delivery reports, and confirmed carrier changes that preserve
   traffic through key rotation, without changing the wire protocol.
 - Select a reachable private exit after pairing and retry a failed daemon
