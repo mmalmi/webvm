@@ -15,7 +15,7 @@ export default defineConfig({
 		trace: 'retain-on-failure',
 	},
 	webServer: externalBaseURL ? undefined : {
-		command: `npm run preview -- --port ${port}`,
+		command: `npm run preview -- --port ${port} --strictPort`,
 		url: baseURL,
 		reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === '1' && !process.env.CI,
 		timeout: 60_000,
