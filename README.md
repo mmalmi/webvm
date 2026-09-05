@@ -2,9 +2,9 @@
 
 Iris WebVM is a private Alpine Linux workspace that runs entirely in the browser. It restores an identity-free, automatically logged-in v86 machine state and connects the guest's virtual Ethernet device to browser-side FIPS transports.
 
-After the first successful nVPN pairing, WebVM selects the first roster peer
+After the first successful nVPN pairing, WebVM selects the first reachable roster peer
 that advertises `0.0.0.0/0` as its private FIPS exit. The one-time selection is
-recorded on the persistent guest disk, so clearing or changing the exit later is
+recorded after the daemon reloads successfully on the persistent guest disk, so clearing or changing the exit later is
 respected. Set `NVPN_WEBVM_AUTO_SELECT_EXIT=0` in the guest service environment
 to disable this behavior.
 
@@ -57,6 +57,11 @@ again during cleanup.
 
 Set `NVPN_WEBVM_E2E_BASE_URL=https://webvm.iris.to` to run the same acceptance
 test against the deployed WebVM instead of the local preview.
+
+For a local release candidate, set `NVPN_WEBVM_NATIVE_SOURCE_MODE=candidate`.
+This accepts an unpublished commit while still requiring a clean repository,
+the exact source commit, matching binary version, and checksummed registry FIPS dependencies.
+Published-source verification remains the default.
 
 ## Guest image and state
 

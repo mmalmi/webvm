@@ -16,8 +16,8 @@ function run(command, args, cwd) {
 function fixtureRepository() {
 	const repository = mkdtempSync(path.join(tmpdir(), 'iris-webvm-native-fixture-'));
 	mkdirSync(path.join(repository, 'crates/nostr-vpn-app-core'), { recursive: true });
-	writeFileSync(path.join(repository, 'Cargo.toml'), `[workspace]\nmembers = ["crates/nostr-vpn-app-core"]\n\n[workspace.package]\nversion = "4.0.94"\n\n[workspace.dependencies]\nfips-core = { version = "=0.4.4" }\nfips-endpoint = "=0.4.4"\n`);
-	writeFileSync(path.join(repository, 'Cargo.lock'), `version = 4\n\n[[package]]\nname = "fips-core"\nversion = "0.4.4"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${FIPS_CHECKSUM}"\n\n[[package]]\nname = "fips-endpoint"\nversion = "0.4.4"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${FIPS_CHECKSUM}"\n`);
+	writeFileSync(path.join(repository, 'Cargo.toml'), `[workspace]\nmembers = ["crates/nostr-vpn-app-core"]\n\n[workspace.package]\nversion = "4.0.94"\n\n[workspace.dependencies]\nfips-core = { package = "nvpn-fips-core", version = "=0.4.4" }\nfips-endpoint = { package = "nvpn-fips-endpoint", version = "=0.4.4" }\n`);
+	writeFileSync(path.join(repository, 'Cargo.lock'), `version = 4\n\n[[package]]\nname = "nvpn-fips-core"\nversion = "0.4.4"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${FIPS_CHECKSUM}"\n\n[[package]]\nname = "nvpn-fips-endpoint"\nversion = "0.4.4"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${FIPS_CHECKSUM}"\n`);
 	const manifest = path.join(repository, 'crates/nostr-vpn-app-core/Cargo.toml');
 	writeFileSync(manifest, '[package]\nname = "nostr-vpn-app-core"\nversion.workspace = true\n');
 	const binary = path.join(repository, 'nvpn');
@@ -53,17 +53,26 @@ test('guest builder rejects implicit sibling repositories and binaries', () => {
 test('native gate attests an explicit clean public source and registry FIPS release', () => {
 	const fixture = fixtureRepository();
 	try {
-		const facts = inspectNativeFixture({
+		const env = {
 			NVPN_WEBVM_NVPN_BIN: fixture.binary,
 			NVPN_APP_CORE_MANIFEST: fixture.manifest,
 			NVPN_WEBVM_NATIVE_SOURCE_SHA: fixture.commit,
 			NVPN_WEBVM_FIPS_VERSION: '0.4.4',
-		});
+		};
+		const facts = inspectNativeFixture(env);
 		assert.equal(facts.sourceCommit, fixture.commit);
 		assert.equal(facts.nvpnVersion, '4.0.94');
 		assert.equal(facts.fipsCore.checksum, FIPS_CHECKSUM);
 		assert.equal(facts.fipsEndpoint.version, '0.4.4');
 		assert.match(facts.nvpnSha256, /^[0-9a-f]{64}$/u);
+		assert.equal(facts.sourceMode, 'published');
+
+		run('git', ['update-ref', '-d', 'refs/remotes/github/master'], fixture.repository);
+		assert.throws(() => inspectNativeFixture(env), /canonical public remote/u);
+		const candidateEnv = { ...env, NVPN_WEBVM_NATIVE_SOURCE_MODE: 'candidate' };
+		assert.equal(inspectNativeFixture(candidateEnv).sourceMode, 'candidate');
+		writeFileSync(fixture.manifest, '[package]\nname = "dirty"\n');
+		assert.throws(() => inspectNativeFixture(candidateEnv), /must be clean/u);
 	} finally {
 		rmSync(fixture.repository, { recursive: true, force: true });
 	}

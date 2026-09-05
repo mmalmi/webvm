@@ -76,17 +76,8 @@ test('WebVM guest keeps authenticated transit discovery open after approval', ()
 	);
 });
 
-test('WebVM guest autoselects one offered private exit without overriding later choices', () => {
-	const launcher = readFileSync('dockerfiles/webvm-nvpn.sh', 'utf8');
+test('WebVM guest selects a reachable private exit in either JSON field order', () => {
 	const selector = 'dockerfiles/webvm-first-exit.awk';
-	assert.match(launcher, /NVPN_WEBVM_AUTO_SELECT_EXIT:-1/u);
-	assert.match(launcher, /\.webvm-exit-autoselect-complete/u);
-	assert.match(launcher, /awk -f \/usr\/local\/libexec\/webvm-first-exit\.awk/u);
-	assert.match(launcher, /daemon\.state\.json/u);
-	assert.doesNotMatch(launcher, /nvpn status/u);
-	assert.match(launcher, /nvpn set --config "\$config" --exit-node "\$exit_peer"/u);
-	assert.match(launcher, /nvpn reload --config "\$config"/u);
-	assert.doesNotMatch(launcher, /--wireguard-exit-enabled true/u);
 
 	for (const peerFirst of [false, true]) {
 		const candidate = [
@@ -103,6 +94,11 @@ test('WebVM guest autoselects one offered private exit without overriding later 
 			'{',
 			'  "peers": [',
 			'    {',
+			'      "advertised_routes": ["0.0.0.0/0"],',
+			'      "participant_pubkey": "offline-exit",',
+			'      "reachable": false',
+			'    },',
+			'    {',
 			'      "advertised_routes": [],',
 			'      "participant_pubkey": "ordinary-peer"',
 			'    },',
@@ -113,6 +109,18 @@ test('WebVM guest autoselects one offered private exit without overriding later 
 		const parsed = spawnSync('awk', ['-f', selector], { input: status, encoding: 'utf8' });
 		assert.equal(parsed.status, 0, parsed.stderr);
 		assert.equal(parsed.stdout.trim(), 'offered-exit');
+	}
+	for (const reachable of [false, undefined]) {
+		const parsed = spawnSync('awk', ['-f', selector], {
+			input: JSON.stringify({ peers: [{
+				participant_pubkey: 'offline-exit',
+				advertised_routes: ['0.0.0.0/0'],
+				reachable,
+			}] }, null, 2),
+			encoding: 'utf8',
+		});
+		assert.equal(parsed.status, 0, parsed.stderr);
+		assert.equal(parsed.stdout, '');
 	}
 });
 

@@ -45,24 +45,30 @@ enforce_webvm_exit_packet_budget() {
 
 first_offered_private_exit() {
     [ -s "$daemon_state" ] || return 1
-    awk -f /usr/local/libexec/webvm-first-exit.awk "$daemon_state"
+    awk -f "${WEBVM_LIBEXEC_DIR:-/usr/local/libexec}/webvm-first-exit.awk" "$daemon_state"
 }
 
 auto_select_first_private_exit() {
     daemon_pid=$1
+    selection_pending=0
     while kill -0 "$daemon_pid" 2>/dev/null; do
         if [ -e "$auto_select_marker" ]; then
             return
         fi
-        if grep -Eq '^internet_source = "(private_vpn|wireguard|paid_automatic|paid_manual)"$' \
-            "$config" 2>/dev/null; then
-            : >"$auto_select_marker"
-            return
+        if [ "$selection_pending" = 0 ]; then
+            if grep -Eq '^internet_source = "(private_vpn|wireguard|paid_automatic|paid_manual)"$' \
+                "$config" 2>/dev/null; then
+                : >"$auto_select_marker"
+                return
+            fi
+            exit_peer=$(first_offered_private_exit || true)
+            if [ -n "$exit_peer" ] && \
+                timeout 5 nvpn set --config "$config" --exit-node "$exit_peer" >/dev/null 2>&1; then
+                selection_pending=1
+            fi
         fi
-        exit_peer=$(first_offered_private_exit || true)
-        if [ -n "$exit_peer" ] && \
-            timeout 5 nvpn set --config "$config" --exit-node "$exit_peer" >/dev/null 2>&1; then
-            timeout 5 nvpn reload --config "$config" >/dev/null 2>&1 || true
+        if [ "$selection_pending" = 1 ] && \
+            timeout 5 nvpn reload --config "$config" >/dev/null 2>&1; then
             : >"$auto_select_marker"
             return
         fi

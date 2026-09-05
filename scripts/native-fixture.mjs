@@ -42,7 +42,7 @@ function exactDependency(source, name) {
 		.find((candidate) => candidate.trimStart().startsWith(`${name} =`));
 	const version = line?.match(/(?:version\s*=\s*)?"=([^"]+)"/u)?.[1];
 	if (!version) throw new Error(`${name} must be exactly pinned in native workspace dependencies`);
-	return version;
+	return { name: line.match(/package\s*=\s*"([^"]+)"/u)?.[1] || name, version };
 }
 
 function lockRecord(source, name) {
@@ -73,6 +73,10 @@ export function inspectNativeFixture(env = process.env) {
 	);
 	const expectedCommit = required(env, 'NVPN_WEBVM_NATIVE_SOURCE_SHA').toLowerCase();
 	const expectedFipsVersion = required(env, 'NVPN_WEBVM_FIPS_VERSION');
+	const sourceMode = env.NVPN_WEBVM_NATIVE_SOURCE_MODE || 'published';
+	if (!['published', 'candidate'].includes(sourceMode)) {
+		throw new Error('NVPN_WEBVM_NATIVE_SOURCE_MODE must be published or candidate');
+	}
 	if (!/^[0-9a-f]{40}$/u.test(expectedCommit)) {
 		throw new Error('NVPN_WEBVM_NATIVE_SOURCE_SHA must be a full 40-character commit');
 	}
@@ -98,7 +102,8 @@ export function inspectNativeFixture(env = process.env) {
 		`--contains=${expectedCommit}`,
 		'refs/remotes',
 	]).split('\n').filter(Boolean);
-	if (!publicRefs.some((ref) => /^refs\/remotes\/(?:github|origin)\/(?:main|master)$/u.test(ref))) {
+	if (sourceMode === 'published'
+		&& !publicRefs.some((ref) => /^refs\/remotes\/(?:github|origin)\/(?:main|master)$/u.test(ref))) {
 		throw new Error(`${expectedCommit} is not present on a canonical public remote-tracking branch`);
 	}
 
@@ -106,15 +111,15 @@ export function inspectNativeFixture(env = process.env) {
 	const workspaceVersion = section(workspaceManifest, 'workspace.package')
 		.match(/^version\s*=\s*"([^"]+)"/mu)?.[1];
 	if (!workspaceVersion) throw new Error('Native workspace version is missing');
-	const coreVersion = exactDependency(workspaceManifest, 'fips-core');
-	const endpointVersion = exactDependency(workspaceManifest, 'fips-endpoint');
-	if (coreVersion !== expectedFipsVersion || endpointVersion !== expectedFipsVersion) {
-		throw new Error(`Native source pins FIPS ${coreVersion}/${endpointVersion}, expected ${expectedFipsVersion}`);
+	const core = exactDependency(workspaceManifest, 'fips-core');
+	const endpoint = exactDependency(workspaceManifest, 'fips-endpoint');
+	if (core.version !== expectedFipsVersion || endpoint.version !== expectedFipsVersion) {
+		throw new Error(`Native source pins FIPS ${core.version}/${endpoint.version}, expected ${expectedFipsVersion}`);
 	}
 
 	const cargoLock = readFileSync(path.join(repository, 'Cargo.lock'), 'utf8');
-	const fipsCore = lockRecord(cargoLock, 'fips-core');
-	const fipsEndpoint = lockRecord(cargoLock, 'fips-endpoint');
+	const fipsCore = lockRecord(cargoLock, core.name);
+	const fipsEndpoint = lockRecord(cargoLock, endpoint.name);
 	if (fipsCore.version !== expectedFipsVersion || fipsEndpoint.version !== expectedFipsVersion) {
 		throw new Error('Native Cargo.lock does not resolve the expected FIPS release');
 	}
@@ -129,6 +134,7 @@ export function inspectNativeFixture(env = process.env) {
 		manifest,
 		repository,
 		sourceCommit,
+		sourceMode,
 		publicRefs,
 		nvpnVersion,
 		nvpnSha256,

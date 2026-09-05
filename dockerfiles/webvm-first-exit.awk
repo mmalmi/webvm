@@ -1,4 +1,4 @@
-# Print the first roster peer offering an IPv4 default route. Parse complete
+# Print the first reachable roster peer offering an IPv4 default route. Parse complete
 # peer objects because nVPN's JSON field order is not part of its interface.
 /"peers"[[:space:]]*:[[:space:]]*\[/ {
     in_peers = 1
@@ -9,6 +9,7 @@ in_peers && !in_peer && /^[[:space:]]*\{[[:space:]]*$/ {
     in_peer = 1
     peer = ""
     offers_exit = 0
+    reachable = 0
     next
 }
 
@@ -22,8 +23,12 @@ in_peer && /"0\.0\.0\.0\/0"/ {
     offers_exit = 1
 }
 
+in_peer && /"reachable"[[:space:]]*:[[:space:]]*true/ {
+    reachable = 1
+}
+
 in_peer && /^[[:space:]]*\}[,]?[[:space:]]*$/ {
-    if (offers_exit && peer != "") {
+    if (offers_exit && reachable && peer != "") {
         print peer
         exit
     }
