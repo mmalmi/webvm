@@ -30,7 +30,8 @@ export async function waitForPrivateExitInternet({ page, runSerialCommand }) {
 		...['http', 'https'].map((scheme) => [
 			`public ${scheme.toUpperCase()}`,
 			'curl --fail --silent --show-error --connect-timeout 10 --max-time 30 ' +
-				`${scheme}://example.com/ | grep -q 'Example Domain'`,
+				`--output /tmp/webvm-internet-probe ${scheme}://example.com/ ` +
+				`&& grep -q 'Example Domain' /tmp/webvm-internet-probe`,
 		]),
 	];
 	for (const [label, command] of checks) {
