@@ -1,6 +1,9 @@
+import { guestControlDiagnostics } from './webvm-control-readiness.js';
+
 export async function waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand }) {
 	const exitReady =
-		`grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
+		`test -f /var/lib/nvpn/.webvm-exit-autoselect-complete ` +
+		`&& grep -q '^internet_source = "private_vpn"$' /var/lib/nvpn/config.toml ` +
 		`&& ip -4 route show 0.0.0.0/0 | grep 'dev nvpn0' | grep -q 'mtu 1000' ` +
 		`&& ! ip -4 addr show dev nvpn0 | grep -q '10.44.0.1/32' ` +
 		`&& ip link show nvpn0 | grep -q 'mtu 1280' ` +
@@ -32,16 +35,9 @@ export async function waitForAutomaticPrivateExit({ page, expectedExit, runSeria
 			await new Promise((resolve) => setTimeout(resolve, 2_000));
 		}
 	}
-	const diagnostics = await runSerialCommand(
-		page,
-		'automatic private FIPS exit diagnostics',
-		"echo __STATUS__; timeout 10 nvpn status || true; echo __ROUTES__; ip -4 route; " +
-			"echo __LINKS__; ip -4 addr show nvpn0 2>&1 || true; " +
-			"ip link show nvpn-wg-exit 2>&1 || true; true",
-		30_000,
-	);
+	const diagnostics = await guestControlDiagnostics({ page, runSerialCommand });
 	throw new Error(
 		`automatic private FIPS exit did not become ready: ` +
-			`${lastReadinessError?.message || 'no completed probe'}\n${diagnostics.join('\n')}`,
+			`${lastReadinessError?.message || 'no completed probe'}\n${diagnostics}`,
 	);
 }

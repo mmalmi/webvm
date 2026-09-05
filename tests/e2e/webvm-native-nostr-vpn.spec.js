@@ -20,6 +20,7 @@ import {
 	stopExitAdminService,
 } from './helpers/webvm-exit-admin.js';
 import { waitForGuestNvpnDaemon } from './helpers/webvm-daemon-readiness.js';
+import { assertApprovedJoinRequest } from './helpers/webvm-control-readiness.js';
 import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
 import { waitForPrivateExitInternet } from './helpers/webvm-internet-readiness.js';
 import { parseSerialCommandResult } from './helpers/webvm-serial-command.js';
@@ -399,11 +400,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			"count=$(grep -Ec '^(nVPN daemon status is unavailable|No active FIPS connections|" +
 			"FIPS connection active)' /tmp/nvpn-join-wait.log || true); " +
 			'if test "$count" -gt 1; then echo __WAIT_STATUS_SPAM__:"$count"; ' +
-			'cat /tmp/nvpn-join-wait.log; exit 1; fi; ' +
-			"if output=$(nvpn join-request --no-qr --no-wait 2>&1); then " +
-			"printf 'approved device unexpectedly received another request\\n'; exit 1; " +
-			"elif ! printf '%s\\n' \"$output\" | grep -Fq 'already approved'; then " +
-			"printf '__UNEXPECTED_APPROVED_RESULT__\\n%s\\n' \"$output\"; exit 1; fi",
+			'cat /tmp/nvpn-join-wait.log; exit 1; fi',
 			60_000,
 		);
 		expect(waitOutput).toEqual([]);
@@ -412,6 +409,9 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		if (exitAdmin) {
 			await waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand });
 			console.log('Private exit selected');
+		}
+		await assertApprovedJoinRequest({ page, runSerialCommand });
+		if (exitAdmin) {
 			try {
 				await waitForPrivateExitInternet({ page, runSerialCommand });
 			} catch (error) {
