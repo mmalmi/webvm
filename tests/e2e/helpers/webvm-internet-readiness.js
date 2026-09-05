@@ -22,6 +22,7 @@ export async function waitForPrivateExitInternet({ page, runSerialCommand }) {
 			`private FIPS exit did not pass its ICMP readiness probe: ${lastReadinessError.message}`,
 		);
 	}
+	console.log('Private exit ping passed');
 
 	const checks = [
 		['system DNS', 'timeout 10 nslookup example.com'],
@@ -41,5 +42,6 @@ export async function waitForPrivateExitInternet({ page, runSerialCommand }) {
 			`for i in $(seq 1 5); do ${command} && exit 0; sleep 2; done; exit 1`,
 			180_000,
 		);
+		console.log(`${label} passed`);
 	}
 }

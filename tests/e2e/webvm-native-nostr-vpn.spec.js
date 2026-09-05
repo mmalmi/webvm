@@ -216,6 +216,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			{ timeoutMs: 120_000, message: 'WebVM shell did not become ready' },
 		);
 		await waitForGuestNvpnDaemon({ page, runSerialCommand });
+		console.log('Guest ready');
 		const output = await runSerialCommand(
 			page,
 			'blocking nVPN join request',
@@ -316,7 +317,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				joinedRecipient = recipientFromJoinRequest(request);
 				stageLiveExitApproval({
 					approvalBinary,
-					fixture,
+					nvpnBinary: exitAdmin.binary,
 					request,
 					config: exitAdmin.config,
 				});
@@ -406,9 +407,11 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 			60_000,
 		);
 		expect(waitOutput).toEqual([]);
+		console.log('Approval delivered');
 
 		if (exitAdmin) {
 			await waitForAutomaticPrivateExit({ page, expectedExit, runSerialCommand });
+			console.log('Private exit selected');
 			try {
 				await waitForPrivateExitInternet({ page, runSerialCommand });
 			} catch (error) {

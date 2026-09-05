@@ -91,11 +91,12 @@ export async function prepareLiveExitApproval({ fixture }) {
 	const prepared = path.join(crate, 'bin', path.basename(artifact.executable));
 	mkdirSync(path.dirname(prepared), { recursive: true });
 	copyFileSync(artifact.executable, prepared);
+	console.log('Native approval helper ready');
 	return prepared;
 }
 
-export function stageLiveExitApproval({ approvalBinary, fixture, request, config }) {
-	return execFileSync(approvalBinary, [config, request, fixture.binary], {
+export function stageLiveExitApproval({ approvalBinary, nvpnBinary, request, config }) {
+	return execFileSync(approvalBinary, [config, request, nvpnBinary], {
 		encoding: 'utf8',
 		timeout: 120_000,
 	}).trim();

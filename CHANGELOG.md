@@ -14,6 +14,8 @@
   accidental snapshots from another server and simplifying preview cleanup.
 - Build the native approval helper before starting the guest, reusing pinned
   dependencies and keeping compilation outside the pairing deadline.
+- Run approval through the selected exit's CLI and report completed pairing
+  and Internet checks, including exits managed outside the local host.
 
 ## 2.0.6 - 2026-08-19
 

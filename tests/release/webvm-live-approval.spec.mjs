@@ -54,10 +54,11 @@ test('live approval builds with pinned dependencies before running the prepared 
 	rmSync(cargo);
 	writeFileSync(executable, `#!${process.execPath}\nprocess.exit(42);\n`);
 	const request = 'nvpn://join-request/test-request';
+	const exitBinary = '/fixture/exit-wrapper';
 	const result = stageLiveExitApproval({
-		approvalBinary, fixture, request, config: '/fixture/config.toml',
+		approvalBinary, nvpnBinary: exitBinary, request, config: '/fixture/config.toml',
 	});
-	assert.deepEqual(JSON.parse(result), ['/fixture/config.toml', request, fixture.binary]);
+	assert.deepEqual(JSON.parse(result), ['/fixture/config.toml', request, exitBinary]);
 
 	writeFileSync(cargo, `#!${process.execPath}\n` +
 		'console.error("native helper compilation failed"); process.exit(1);\n', { mode: 0o755 });
