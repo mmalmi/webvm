@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.7 - 2026-09-05
+
+- Select a reachable private exit after pairing and retry a failed daemon
+  reload before recording the automatic choice. Preserve later manual choices.
+- Verify public HTTP and certificate-checked HTTPS alongside ICMP and DNS,
+  with bounded probe timeouts and fewer redundant retries.
+- Resolve native FIPS package aliases when validating paired nVPN fixtures,
+  and allow explicit clean release candidates before publication.
+
 ## 2.0.6 - 2026-08-19
 
 - Retry transient reliable-pubsub FIPS session setup while the authenticated
