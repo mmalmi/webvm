@@ -4,10 +4,10 @@
 
 - Warm coordinates when browser traffic changes transit paths and accept coordinate
   warmup from native peers without repeating session setup.
-
 - Upgrade browser FIPS core to 0.0.42 for faster replay protection, matching
   Rust timing and delivery reports, and confirmed carrier changes that preserve
   traffic through key rotation, without changing the wire protocol.
+- Upgrade the Linux guest to nVPN 4.1.10 and native FIPS 0.4.74.
 - Select a reachable private exit after pairing and retry a failed daemon
   reload before recording the automatic choice. Preserve later manual choices.
 - Verify public HTTP and certificate-checked HTTPS alongside ICMP and DNS,
