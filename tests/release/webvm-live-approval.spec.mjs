@@ -17,11 +17,14 @@ test('live approval builds with pinned dependencies before running the prepared 
 	const buildArguments = path.join(directory, 'build.json');
 	const previousCargo = process.env.CARGO;
 	const previousTarget = process.env.CARGO_TARGET_DIR;
+	const previousExecutor = process.env.NVPN_WEBVM_NATIVE_EXECUTOR;
 	t.after(() => {
 		if (previousCargo === undefined) delete process.env.CARGO;
 		else process.env.CARGO = previousCargo;
 		if (previousTarget === undefined) delete process.env.CARGO_TARGET_DIR;
 		else process.env.CARGO_TARGET_DIR = previousTarget;
+		if (previousExecutor === undefined) delete process.env.NVPN_WEBVM_NATIVE_EXECUTOR;
+		else process.env.NVPN_WEBVM_NATIVE_EXECUTOR = previousExecutor;
 		rmSync(directory, { recursive: true, force: true });
 	});
 	mkdirSync(repository);
@@ -36,6 +39,7 @@ test('live approval builds with pinned dependencies before running the prepared 
 			target: { name: 'iris-webvm-live-exit-approval', kind: ['bin'] },
 			executable,
 		}))});\n`, { mode: 0o755 });
+	delete process.env.NVPN_WEBVM_NATIVE_EXECUTOR;
 	process.env.CARGO = cargo;
 	process.env.CARGO_TARGET_DIR = path.join(directory, 'target');
 	const fixture = { repository, binary: '/fixture/nvpn', sourceCommit: 'a'.repeat(40) };
