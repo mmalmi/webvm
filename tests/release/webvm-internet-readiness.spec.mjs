@@ -21,7 +21,7 @@ test('Internet failures retain the original error and run bounded payload-free p
 			{ mode: 0o755 });
 	}
 	for (const diagnosticFailure of [false, true]) {
-		const original = new Error('system DNS failed');
+		const original = new Error('package indexes failed');
 		let diagnostics = 0;
 		await assert.rejects(waitForPrivateExitInternet({
 			page: null,
@@ -40,7 +40,7 @@ test('Internet failures retain the original error and run bounded payload-free p
 			},
 		}), (error) => {
 			assert.equal(error, original);
-			assert.match(error.message, /^system DNS failed/u);
+			assert.match(error.message, /^package indexes failed/u);
 			assert.doesNotMatch(error.message, /private response|private timeout/u);
 			assert.match(error.message, diagnosticFailure ? /exceeded their deadline/u : /status: SERVFAIL/u);
 			return true;
@@ -61,10 +61,15 @@ test('Internet failures retain the original error and run bounded payload-free p
 
 test('successful Internet checks do not run failure diagnostics', async () => {
 	const labels = [];
-	await waitForPrivateExitInternet({ page: null, runSerialCommand: async (_page, label) => {
+	await waitForPrivateExitInternet({ page: null, runSerialCommand: async (_page, label, command) => {
 		labels.push(label);
+		if (label.includes('package indexes')) {
+			assert.equal(command, 'timeout 90 apk update');
+		}
+		assert.doesNotMatch(command, /for i in|seq 1 5/u, 'first-use failures must not be hidden by retries');
 		return [];
 	} });
-	assert.equal(labels.length, 5);
+	assert.equal(labels.length, 6);
+	assert.match(labels[1], /package indexes/u);
 	assert.ok(labels.every((label) => !label.includes('diagnostics')));
 });

@@ -40,7 +40,7 @@ async function privateExitInternetDiagnostics({ page, runSerialCommand }) {
 }
 
 async function checkPrivateExitInternet({ page, runSerialCommand }) {
-	const deadline = Date.now() + 300_000;
+	const deadline = Date.now() + 60_000;
 	let lastReadinessError;
 	while (Date.now() < deadline) {
 		try {
@@ -66,6 +66,9 @@ async function checkPrivateExitInternet({ page, runSerialCommand }) {
 	console.log('Private exit ping passed');
 
 	const checks = [
+		// Fetch a fresh hostname before other DNS/HTTPS checks warm the path.
+		// A started fetch is insufficient: apk must finish both signed indexes.
+		['package indexes', 'timeout 90 apk update'],
 		['system DNS', 'timeout 10 nslookup example.com'],
 		['public DNS', '( timeout 10 nslookup example.com 9.9.9.9 ' +
 			'|| timeout 10 nslookup example.com 149.112.112.112 )'],
@@ -80,8 +83,8 @@ async function checkPrivateExitInternet({ page, runSerialCommand }) {
 		await runSerialCommand(
 			page,
 			`${label} through the private FIPS exit`,
-			`for i in $(seq 1 5); do ${command} && exit 0; sleep 2; done; exit 1`,
-			180_000,
+			command,
+			label === 'package indexes' ? 100_000 : 40_000,
 		);
 		console.log(`${label} passed`);
 	}

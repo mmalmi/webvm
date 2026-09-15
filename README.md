@@ -63,6 +63,11 @@ This accepts an unpublished commit while still requiring a clean repository,
 the exact source commit, matching binary version, and checksummed registry FIPS dependencies.
 Published-source verification remains the default and is required for deployment.
 
+The private-exit acceptance test allows one minute for automatic exit selection.
+It then requires a complete `apk update` before the DNS and HTTP checks warm the
+connection. Package, system DNS, HTTP, and HTTPS checks run once, so a successful
+retry cannot hide a first-use failure.
+
 ## Guest image and state
 
 Build the Alpine i686 guest and capture a compressed, preinitialized state:

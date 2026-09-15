@@ -10,7 +10,7 @@ export async function waitForAutomaticPrivateExit({ page, expectedExit, runSeria
 		`&& iptables -t mangle -C OUTPUT -o nvpn0 -p tcp ` +
 		`--tcp-flags SYN,RST SYN -j TCPMSS --set-mss 960 ` +
 		`&& ! ip link show nvpn-wg-exit >/dev/null 2>&1`;
-	const deadline = Date.now() + 300_000;
+	const deadline = Date.now() + 60_000;
 	let lastReadinessError;
 	while (Date.now() < deadline) {
 		try {
