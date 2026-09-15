@@ -6,6 +6,7 @@
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 	import { attachWebvmDisk } from '$lib/webvmDisk.js';
 	import { installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
+	import { WEBVM_MEMORY_BYTES } from '$lib/webvmGuestConfig.js';
 	import '$lib/global.css';
 	import '@xterm/xterm/css/xterm.css';
 
@@ -187,9 +188,7 @@ ${WELCOME_BORDER}
 		resumeRequested = true;
 		const snapshotBuild = new URLSearchParams(globalThis.location.search).has('snapshot-build');
 		const entropy = crypto.getRandomValues(new Uint8Array(64));
-		const entropyHex = [...entropy]
-			.map((byte) => byte.toString(16).padStart(2, '0'))
-			.join('');
+		const entropyHex = [...entropy].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 		setTimeout(() => {
 			instance.serial0_send?.(
 				`stty -echo; printf '%s' '${entropyHex}' | xxd -r -p | webvm-seed-rng; ` +
@@ -226,6 +225,7 @@ ${WELCOME_BORDER}
 			throw new Error(`Failed to load WebVM state manifest (${manifestResponse.status})`);
 		}
 		const manifest = await manifestResponse.json();
+		if (manifest.memoryBytes !== WEBVM_MEMORY_BYTES) return null;
 		if (manifest.schema !== 1 || !Array.isArray(manifest.chunks) || manifest.chunks.length === 0) {
 			throw new Error('Invalid WebVM state manifest');
 		}
@@ -332,7 +332,7 @@ ${WELCOME_BORDER}
 		});
 		const options = {
 			wasm_path: V86_WASM_URL,
-			memory_size: 96 * 1024 * 1024,
+			memory_size: WEBVM_MEMORY_BYTES,
 			vga_memory_size: 8 * 1024 * 1024,
 			autostart: false,
 			fastboot: true,

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
 import { createV86EthernetFramePort } from '../../src/lib/v86EthernetFramePort.js';
+import { WEBVM_MEMORY_BYTES } from '../../src/lib/webvmGuestConfig.js';
 
 test('legacy upstream WebVM routes and assets are not published', async ({ request }) => {
 	for (const path of [
@@ -153,7 +154,7 @@ test('v86 boots only same-origin guest assets and starts the generic FIPS host',
 		.toMatchObject({
 			autostart: false,
 			wasm_path: '/v86/v86.wasm',
-			memory_size: 96 * 1024 * 1024,
+			memory_size: WEBVM_MEMORY_BYTES,
 			biosUrl: '/v86/seabios.bin',
 			vgaBiosUrl: '/v86/vgabios.bin',
 			bzimageInitrdFromFilesystem: true,
@@ -349,12 +350,24 @@ test('v86 persists its local disk and can reset it', async ({ page }) => {
 	)).toBe(0);
 });
 
+test('v86 cold boots instead of restoring an undersized memory snapshot', async ({ page }) => {
+	await page.route('**/v86/guest/state/manifest.json', (route) => route.fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify({ schema: 1, memoryBytes: 96 * 1024 * 1024, chunks: [] }),
+	}));
+	await installMockV86(page);
+	await page.goto('/v86');
+	await expect.poll(() => page.evaluate(() => window.__v86RouteTestState.ran)).toBe(true);
+	expect(await page.evaluate(() => window.__v86RouteTestState.restoredState)).toBeUndefined();
+});
+
 test('v86 restores the preinitialized logged-in environment before starting guest services', async ({ page }) => {
 	const state = Buffer.from([1, 3, 3, 7]);
 	await page.route('**/v86/guest/state/manifest.json', (route) => route.fulfill({
 		contentType: 'application/json',
 		body: JSON.stringify({
 			schema: 1,
+			memoryBytes: WEBVM_MEMORY_BYTES,
 			bytes: state.length,
 			chunks: [{
 				file: 'state-000.bin',

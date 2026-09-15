@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 
 import { chromium } from '@playwright/test';
 import { preview as startPreview } from 'vite';
+import { WEBVM_MEMORY_BYTES } from '../src/lib/webvmGuestConfig.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outputDirectory = path.join(root, 'custom-disk-images/v86-guest/state');
@@ -64,13 +65,16 @@ async function captureState(downloadPath) {
 				"test ! -e /var/lib/hashtree/config/auth.cookie && " +
 				"test -z \"$(find /var/lib/nvpn /var/lib/hashtree/data -type f -print -quit)\" && " +
 				"sync && echo 3 > /proc/sys/vm/drop_caches && " +
+				"scrub_mib=$(awk '/^MemAvailable:/ {print int($2/1024)-16}' /proc/meminfo) && " +
+				"test \"$scrub_mib\" -gt 0 && " +
 				"mkdir -p /run/webvm-snapshot-scrub && " +
-				"mount -t tmpfs -o size=36m tmpfs /run/webvm-snapshot-scrub && " +
-				"dd if=/dev/zero of=/run/webvm-snapshot-scrub/zero bs=1M count=36 >/dev/null 2>&1 && " +
+				"mount -t tmpfs -o size=${scrub_mib}m tmpfs /run/webvm-snapshot-scrub && " +
+				"dd if=/dev/zero of=/run/webvm-snapshot-scrub/zero bs=1M count=\"$scrub_mib\" >/dev/null 2>&1 && " +
 				"rm /run/webvm-snapshot-scrub/zero && " +
 				"umount /run/webvm-snapshot-scrub && rmdir /run/webvm-snapshot-scrub && " +
-				"sync && echo 3 > /proc/sys/vm/drop_caches && " +
-				"history -c 2>/dev/null; rm -f /root/.ash_history; " +
+				"sync && echo 3 > /proc/sys/vm/drop_caches " +
+				"|| { echo __IRIS_SNAPSHOT_FAILED__; exit 1; }; " +
+				"history -c >/dev/null 2>&1; rm -f /root/.ash_history; " +
 				"exec /bin/ash -c \"printf '__IRIS_SNAPSHOT_%s__\\n' READY; exec /bin/ash\"\n",
 			);
 		});
@@ -122,8 +126,15 @@ async function main() {
 	const compressedStatePath = path.join(temporaryDirectory, 'state.bin.zst');
 	try {
 		await captureState(statePath);
+		const capturedState = await readFile(statePath);
+		const metadataBytes = capturedState.readUInt32LE(12);
+		const metadata = JSON.parse(capturedState.subarray(16, 16 + metadataBytes).toString());
+		if (metadata.state?.[0] !== WEBVM_MEMORY_BYTES) {
+			throw new Error('Captured WebVM memory does not match the configured guest memory');
+		}
+		// Keep the larger guest within the existing single-chunk download budget.
 		await run('zstd', [
-			'-3',
+			'-19',
 			'--no-progress',
 			'--force',
 			statePath,
@@ -151,7 +162,7 @@ async function main() {
 			encoding: 'zstd',
 			createdAt: new Date().toISOString(),
 			bytes: state.length,
-			memoryBytes: 96 * 1024 * 1024,
+			memoryBytes: WEBVM_MEMORY_BYTES,
 			v86Version: v86Package.version,
 			guestManifestSha256: sha256(guestManifest),
 			chunks,

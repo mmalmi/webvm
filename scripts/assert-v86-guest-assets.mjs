@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WEBVM_MEMORY_BYTES } from '../src/lib/webvmGuestConfig.js';
 
 import {
 	GUEST_MANIFEST_SCHEMA,
@@ -78,7 +79,7 @@ const guestManifestRecord = await fileRecord(manifestPath);
 if (
 	stateManifest.schema !== 1 ||
 	stateManifest.encoding !== 'zstd' ||
-	stateManifest.memoryBytes !== 96 * 1024 * 1024 ||
+	stateManifest.memoryBytes !== WEBVM_MEMORY_BYTES ||
 	stateManifest.v86Version !== v86Package.version ||
 	stateManifest.guestManifestSha256 !== guestManifestRecord.sha256 ||
 	!Array.isArray(stateManifest.chunks) ||
