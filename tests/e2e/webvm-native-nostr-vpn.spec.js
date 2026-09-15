@@ -336,11 +336,8 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					{ ok: true, event: 'delivered', recipient: joinedRecipient },
 				];
 			} else {
-				approvalEvents = await runStandardApproval({
-					fixture,
-					request,
-					dataDir,
-					isGuestRosterApplied: () => guestRosterApplied(page),
+				approvalEvents = await approveAndWaitForGuestRoster({
+					fixture, request, dataDir, page,
 				});
 			}
 		} catch (error) {

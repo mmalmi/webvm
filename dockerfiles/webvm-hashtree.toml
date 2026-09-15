@@ -30,7 +30,9 @@ enabled = false
 event_transport = "fips-local-only"
 relays = []
 bootstrap_follows = []
-db_max_size_gb = 1
+# Nostr indexing is disabled. Use the 64 MiB minimum social graph map so the
+# database mappings fit alongside blob storage in the 32-bit guest.
+db_max_size_gb = 0
 spambox_max_size_gb = 0
 
 [blossom]

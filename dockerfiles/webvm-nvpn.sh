@@ -91,6 +91,9 @@ nvpn set \
     --config "$config" \
     --fips-host-tunnel-enabled true \
     --connect-to-non-roster-fips-peers true \
+    --fips-bootstrap-enabled false \
+    --fips-webrtc-enabled false \
+    --lan-discovery-enabled false \
     --exit-dns-mode through_exit \
     --exit-dns-through-exit-servers 9.9.9.9,149.112.112.112 \
     >/dev/null

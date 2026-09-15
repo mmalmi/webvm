@@ -111,6 +111,12 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 		.toContainText('Starting FIPS networking...');
 	await waitForTerminal(page);
 	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk');
+	await runCommand(
+		page,
+		"grep -qx 'db_max_size_gb = 0' /var/lib/hashtree/config/config.toml && " +
+			'curl --silent --show-error --max-time 5 --output /dev/null http://127.0.0.1/',
+		'__HASHTREE_STARTED__',
+	);
 
 	const terminal = page.getByTestId('v86-serial');
 	await runCommand(
@@ -152,12 +158,23 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 		'__NVPN_SECRETS_HASHED__',
 	);
 	await runCommand(page, 'echo user-history-survives-refresh', '__USER_HISTORY_WRITTEN__');
+	await runCommand(
+		page,
+		"sed -i 's/^db_max_size_gb = 0$/db_max_size_gb = 1/' /var/lib/hashtree/config/config.toml",
+		'__OLD_HASHTREE_LIMIT_SAVED__',
+	);
 	await runCommand(page, 'history -w', '__USER_HISTORY_FLUSHED__');
 	await page.evaluate(() => globalThis.irisWebvmV86.flushDisk());
 	await expect.poll(() => savedDiskExists(page), { timeout: 15_000 }).toBe(true);
 
 	await page.reload();
 	await waitForTerminal(page);
+	await runCommand(
+		page,
+		"grep -qx 'db_max_size_gb = 0' /var/lib/hashtree/config/config.toml && " +
+			'curl --silent --show-error --max-time 5 --output /dev/null http://127.0.0.1/',
+		'__HASHTREE_RESTORED__',
+	);
 	await runCommand(page, 'cat /root/webvm-persistence-check', '__FILE_RESTORED__');
 	await expect.poll(() => terminalText(page)).toContain('browser-local-data');
 	await runCommand(page, 'history', '__HISTORY_RESTORED__');

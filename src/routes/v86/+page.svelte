@@ -82,7 +82,6 @@ ${WELCOME_BORDER}
 
 	function installEmulatorListeners(instance) {
 		const serialDecoder = new TextDecoder();
-		let serialText = '';
 		removeEmulatorListeners = [
 			addEmulatorListener(instance, 'emulator-loaded', () => {
 				vmState = 'loaded';
@@ -108,10 +107,6 @@ ${WELCOME_BORDER}
 			addEmulatorListener(instance, 'serial0-output-byte', (byte) => {
 				const text = serialDecoder.decode(Uint8Array.of(byte & 0xff), { stream: true });
 				if (!text) return;
-				serialText += text;
-				if (serialText.length > SERIAL_BUFFER_LIMIT) {
-					serialText = serialText.slice(-SERIAL_BUFFER_LIMIT);
-				}
 				if (terminalReady) {
 					serialTerminal?.write(text);
 					return;
@@ -195,6 +190,11 @@ ${WELCOME_BORDER}
 				`date -u -s '@${Math.floor(Date.now() / 1_000)}' >/dev/null; ` +
 				`hostname webvm; export PS1='$(history -w >/dev/null 2>&1)root@webvm:\\w# '; ` +
 				(snapshotBuild ? '' :
+					// Migrate saved guests; browser transports provide the IP underlay.
+					`sed -i 's/^db_max_size_gb = 1$/db_max_size_gb = 0/' ` +
+					`/var/lib/hashtree/config/config.toml; ` +
+					`nvpn set --fips-bootstrap-enabled false --fips-webrtc-enabled false ` +
+					`--lan-discovery-enabled false >/dev/null; ` +
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; ` +
 					`for attempt in $(seq 1 120); do ` +
