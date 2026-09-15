@@ -220,9 +220,11 @@ test('v86 presents one WebVM-style terminal and never reveals cold-boot output',
 		"sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'",
 	);
 	expect(resumeCommand).toContain(
-		"for attempt in $(seq 1 120); do if ss -lun | grep -q '127.0.0.1:53' && " +
-		"find /var/lib/nvpn/.nvpn-runtime -type s -name 'join-*.sock' 2>/dev/null | grep -q .; " +
-		"then break; fi; sleep 1; done;",
+		'for attempt in $(seq 1 480); do ready=; ' +
+		'for sock in /var/lib/nvpn/.nvpn-runtime/join-*.sock; do ' +
+		'if test -S "$sock"; then ready=1; break; fi; done; ' +
+		'if test "$ready" = 1 && grep -q \'^ *[0-9]*: 0100007F:0035 \' /proc/net/udp; ' +
+		'then break; fi; sleep 0.25; done;',
 	);
 	expect(resumeCommand).not.toContain('/etc/resolv.conf');
 	expect(resumeCommand).toContain("sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'");

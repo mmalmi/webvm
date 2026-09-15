@@ -198,10 +198,10 @@ ${WELCOME_BORDER}
 					`--lan-discovery-enabled false >/dev/null; ` +
 					`sh -c '(rc-service webvm-nvpn start) >/dev/null 2>&1 &'; ` +
 					`sh -c '(rc-service webvm-hashtree start) >/dev/null 2>&1 &'; ` +
-					`for attempt in $(seq 1 120); do ` +
-					`if ss -lun | grep -q '127.0.0.1:53' && ` +
-						`find /var/lib/nvpn/.nvpn-runtime -type s -name 'join-*.sock' ` +
-						`2>/dev/null | grep -q .; then break; fi; sleep 1; done; `) +
+					`for attempt in $(seq 1 480); do ready=; ` +
+					`for sock in /var/lib/nvpn/.nvpn-runtime/join-*.sock; do if test -S "$sock"; ` +
+						`then ready=1; break; fi; done; ` +
+					`if test "$ready" = 1 && grep -q '^ *[0-9]*: 0100007F:0035 ' /proc/net/udp; then break; fi; sleep 0.25; done; `) +
 				`{ grep -v '__IRIS_WEBVM_' /root/.ash_history 2>/dev/null || true; } ` +
 				`> /root/.ash_history.iris-resume; history -c 2>/dev/null; ` +
 				`mv /root/.ash_history.iris-resume /root/.ash_history; ` +
