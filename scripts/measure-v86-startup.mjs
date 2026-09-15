@@ -4,6 +4,7 @@ const ROOTFS_PATH = '/v86/guest/rootfs/';
 const targetUrl = process.argv[2] || 'https://webvm.iris.to/v86';
 const runCount = Number.parseInt(process.argv[3] || '3', 10);
 const maxStartupMs = Number.parseFloat(process.env.WEBVM_MAX_STARTUP_MS || 'Infinity');
+const maxNvpnStartupMs = Number.parseFloat(process.env.WEBVM_MAX_NVPN_STARTUP_MS || 'Infinity');
 const startupTimeoutMs = Number.parseInt(process.env.WEBVM_STARTUP_TIMEOUT_MS || '60000', 10);
 const maxRevalidations = Number.parseInt(
 	process.env.WEBVM_MAX_ROOTFS_REVALIDATIONS || '2147483647',
@@ -41,6 +42,7 @@ try {
 			return {
 				terminalReady: ready,
 				startupMs: performance.now(),
+				nvpnStartupMs: performance.getEntriesByName('webvm-nvpn-startup')[0]?.duration ?? null,
 				stateCompleteMs: end(state),
 				rootfsCompleteMs: end(rootfs),
 				rootfsFetches: rootfs.length,
@@ -66,6 +68,8 @@ const summary = {
 	targetUrl,
 	runs: results,
 	medianStartupMs: sortedStartup[Math.floor(sortedStartup.length / 2)],
+	medianNvpnStartupMs: results.map(({ nvpnStartupMs }) => nvpnStartupMs)
+		.sort((a, b) => a - b)[Math.floor(results.length / 2)],
 	maxRootfsConditionalRevalidations: Math.max(
 		...results.map(({ rootfsConditionalRevalidations }) => rootfsConditionalRevalidations),
 	),
@@ -73,5 +77,8 @@ const summary = {
 console.log(JSON.stringify(summary, null, 2));
 
 if (summary.medianStartupMs > maxStartupMs) process.exitCode = 1;
+if (Number.isFinite(maxNvpnStartupMs) && results.some(
+	({ nvpnStartupMs }) => nvpnStartupMs === null || nvpnStartupMs > maxNvpnStartupMs,
+)) process.exitCode = 1;
 if (summary.maxRootfsConditionalRevalidations > maxRevalidations) process.exitCode = 1;
 if (results.some(({ terminalReady }) => !terminalReady)) process.exitCode = 1;

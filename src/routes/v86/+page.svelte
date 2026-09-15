@@ -137,6 +137,7 @@ ${WELCOME_BORDER}
 				serialTerminal?.write(resumedOutput);
 				startupOutput = '';
 				terminalReady = true;
+				performance.measure('webvm-nvpn-startup', 'webvm-nvpn-start');
 				if (serialTerminal) serialTerminal.options = { disableStdin: false };
 				serialTerminal?.focus();
 				publishDebugState();
@@ -177,7 +178,6 @@ ${WELCOME_BORDER}
 		serialResizeObserver.observe(serialConsole);
 		publishDebugState();
 	}
-
 	function requestGuestResume(instance) {
 		if (resumeRequested) return;
 		resumeRequested = true;
@@ -185,6 +185,7 @@ ${WELCOME_BORDER}
 		const entropy = crypto.getRandomValues(new Uint8Array(64));
 		const entropyHex = [...entropy].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 		setTimeout(() => {
+			performance.mark('webvm-nvpn-start');
 			instance.serial0_send?.(
 				`stty -echo; printf '%s' '${entropyHex}' | xxd -r -p | webvm-seed-rng; ` +
 				`date -u -s '@${Math.floor(Date.now() / 1_000)}' >/dev/null; ` +
@@ -209,7 +210,6 @@ ${WELCOME_BORDER}
 			);
 		}, 50);
 	}
-
 	async function sha256Hex(bytes) {
 		const digest = await crypto.subtle.digest('SHA-256', bytes);
 		return [...new Uint8Array(digest)]

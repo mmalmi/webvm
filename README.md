@@ -33,6 +33,15 @@ npm run build
 npm run test:e2e
 ```
 
+Measure fresh nVPN startup separately from VM loading, with a ten-second budget:
+
+```sh
+WEBVM_MAX_NVPN_STARTUP_MS=10000 npm run perf:startup -- http://127.0.0.1:4173/v86 3
+```
+
+Run the preview server first. The nVPN timer starts when the guest resumes and
+ends when its DNS listener and join-request socket are ready.
+
 The credentialed end-to-end Nostr VPN test is skipped unless its host-test environment is configured.
 To additionally prove automatic private-exit selection and public traffic through
 an existing non-WireGuard exit, point the test at an exit-advertising admin
