@@ -137,7 +137,7 @@ ${WELCOME_BORDER}
 				serialTerminal?.write(resumedOutput);
 				startupOutput = '';
 				terminalReady = true;
-				performance.measure('webvm-nvpn-startup', 'webvm-nvpn-start');
+				if (resumeRequested) performance.measure('webvm-nvpn-startup', 'webvm-nvpn-start');
 				if (serialTerminal) serialTerminal.options = { disableStdin: false };
 				serialTerminal?.focus();
 				publishDebugState();
