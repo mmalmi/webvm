@@ -4,7 +4,9 @@
 
 - Use paths with enough capacity for peer connection messages and recover authenticated peer connections sooner.
 - Retry lost peer handshakes and connection answers as routes recover.
-- Preserve saved disks and browser identity.
+- Update the guest to nVPN 4.1.17 and FIPS 0.4.85.
+- Preserve the whole saved filesystem, including service keys, permissions, and links, during guest updates.
+- Leave the saved disk intact and show a clear error if an update cannot be applied.
 
 ## 2.0.9 - 2026-09-30
 

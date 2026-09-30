@@ -4,7 +4,7 @@
 	import VmToolbar from '$lib/VmToolbar.svelte';
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
-	import { attachWebvmDisk } from '$lib/webvmDisk.js';
+	import { attachWebvmDisk, clearWebvmDisk } from '$lib/webvmDisk.js';
 	import { installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
 	import { WEBVM_MEMORY_BYTES } from '$lib/webvmGuestConfig.js';
 	import '$lib/global.css';
@@ -259,26 +259,22 @@ ${WELCOME_BORDER}
 	}
 
 	async function attachPersistentDisk(instance) {
-		try {
-			diskController = await attachWebvmDisk({
-				compatibilityId: await diskCompatibilityId(),
-				filesystem: instance.fs9p,
-				onStatus(status, usageBytes = null) {
-					diskStatus = status;
-					diskUsageBytes = usageBytes;
-				},
-			});
-		} catch (error) {
-			console.error('Failed to initialize the WebVM local disk', error);
-			diskStatus = 'unavailable';
-		}
+		diskController = await attachWebvmDisk({
+			compatibilityId: await diskCompatibilityId(),
+			filesystem: instance.fs9p,
+			onStatus(status, usageBytes = null) {
+				diskStatus = status;
+				diskUsageBytes = usageBytes;
+			},
+		});
 	}
 
 	async function resetVm() {
 		if (resettingVm || !confirm('Delete this browser\'s saved WebVM disk and start clean?')) return;
 		resettingVm = true;
 		diskStatus = 'resetting';
-		await diskController?.reset();
+		if (diskController) await diskController.reset();
+		else await clearWebvmDisk();
 		clearWebvmFipsIdentity();
 		globalThis.location.reload();
 	}
@@ -398,6 +394,7 @@ ${WELCOME_BORDER}
 			vmState = 'load-failed';
 			vmError = messageFromError(error);
 			vmSummary = vmError || 'WebVM failed to load';
+			serialTerminal?.writeln(`\r\n${vmSummary}`);
 			publishDebugState();
 		}
 	}

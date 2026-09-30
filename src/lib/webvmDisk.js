@@ -1,13 +1,9 @@
 const DATABASE_NAME = 'iris-webvm';
 const DATABASE_VERSION = 1;
 const DISK_RECORD_SCHEMA = 2;
-const PORTABLE_FILE_PATHS = [
-	'/root/.ash_history',
-	'/var/lib/nvpn/config.toml',
-	'/var/lib/nvpn/.config.toml.nostr-secret-key.secret',
-	'/var/lib/nvpn/.config.toml.pending-join-request.secret',
-	'/var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret',
-	'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret',
+const SYSTEM_UPDATE_PATHS = [
+	'/usr/local/bin/nvpn',
+	'/etc/webvm-guest-binaries.sha256',
 ];
 const RECORD_KEY = 'root-filesystem';
 const SAVE_DELAY_MS = 1_000;
@@ -55,7 +51,7 @@ async function saveRecord(record) {
 	await runTransaction('readwrite', (store) => requestToPromise(store.put(record, RECORD_KEY)));
 }
 
-async function clearRecord() {
+export async function clearWebvmDisk() {
 	await runTransaction('readwrite', (store) => requestToPromise(store.delete(RECORD_KEY)));
 }
 
@@ -82,49 +78,32 @@ function serializableFilesystemState(filesystem) {
 	return state;
 }
 
-async function readPortableFiles(filesystem) {
-	if (!filesystem?.SearchPath || !filesystem?.GetInode || !filesystem?.Read) return {};
-	const files = {};
-	for (const filePath of PORTABLE_FILE_PATHS) {
-		const location = filesystem.SearchPath(filePath);
-		if (!location || location.id < 0) continue;
-		const inode = filesystem.GetInode(location.id);
-		const data = await filesystem.Read(location.id, 0, inode.size);
-		if (data) files[filePath] = new Uint8Array(data);
+function systemFile(filesystem, filePath) {
+	const { id } = filesystem.SearchPath(filePath);
+	const inode = id >= 0 && filesystem.GetInode(id);
+	if (!inode || (inode.mode & 0o170000) !== 0o100000) {
+		throw new Error(`Missing regular system file: ${filePath}`);
 	}
-	return files;
+	return { id, inode };
 }
 
-async function restorePortableFiles(filesystem, files) {
-	if (!files || !filesystem?.SearchPath || !filesystem?.GetInode
-		|| !filesystem?.CreateFile || !filesystem?.ChangeSize || !filesystem?.Write) return;
-	for (const filePath of PORTABLE_FILE_PATHS) {
-		const data = files[filePath];
-		if (!(data instanceof Uint8Array)) continue;
-		let location = filesystem.SearchPath(filePath);
-		if (location.id < 0) {
-			const separator = filePath.lastIndexOf('/');
-			const parent = filesystem.SearchPath(filePath.slice(0, separator));
-			if (parent.id < 0) continue;
-			const id = filesystem.CreateFile(filePath.slice(separator + 1), parent.id);
-			location = { id };
-		}
-		await filesystem.ChangeSize(location.id, data.byteLength);
-		await filesystem.Write(location.id, 0, data.byteLength, data);
-	}
-}
-
-async function recoverPortableFilesFromState(filesystem, state) {
-	if (!state) return {};
-	const freshState = serializableFilesystemState(filesystem);
-	try {
-		filesystem.set_state(state);
-		return await readPortableFiles(filesystem);
-	} catch (error) {
-		console.warn('Could not recover portable files from the previous WebVM disk', error);
-		return {};
-	} finally {
-		filesystem.set_state(freshState);
+function upgradeFilesystem(filesystem, state) {
+	// Restore the complete disk, including links, permissions and service keys.
+	// Only these two shipped files change in this guest update. Keep their fresh
+	// content-addressed backing so the new binary is still loaded on demand.
+	const updates = SYSTEM_UPDATE_PATHS.map((filePath) => {
+		const { id, inode } = systemFile(filesystem, filePath);
+		const metadata = Object.fromEntries([
+			'mode', 'uid', 'gid', 'size', 'mtime', 'ctime', 'status', 'sha256sum',
+		].map((name) => [name, inode[name]]));
+		return { filePath, metadata, data: filesystem.inodedata[id]?.slice() };
+	});
+	filesystem.set_state(state);
+	for (const { filePath, metadata, data } of updates) {
+		const { id, inode } = systemFile(filesystem, filePath);
+		Object.assign(inode, metadata);
+		if (data) filesystem.inodedata[id] = data;
+		else delete filesystem.inodedata[id];
 	}
 }
 
@@ -143,23 +122,27 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 
 	try {
 		const record = await loadRecord();
-		if ([1, DISK_RECORD_SCHEMA].includes(record?.schema)
-			&& record.compatibilityId === compatibilityId) {
-			filesystem.set_state(record.state);
-		} else if ([1, DISK_RECORD_SCHEMA].includes(record?.schema)) {
-			const recoveredFiles = await recoverPortableFilesFromState(filesystem, record.state);
-			await restorePortableFiles(filesystem, {
-				...recoveredFiles,
-				...record.portableFiles,
-			});
+		if (record) {
+			if (![1, DISK_RECORD_SCHEMA].includes(record.schema)) {
+				throw new Error('Unsupported saved disk format');
+			}
+			if (record.compatibilityId === compatibilityId) filesystem.set_state(record.state);
+			else {
+				upgradeFilesystem(filesystem, record.state);
+				// Commit only after the full restore and every system update succeeds.
+				await saveRecord({
+					schema: DISK_RECORD_SCHEMA, compatibilityId,
+					state: serializableFilesystemState(filesystem),
+				});
+			}
 		}
-		void navigator.storage?.persist?.().catch(() => false);
-		await publishReadyStatus();
 	} catch (error) {
 		console.error('WebVM local disk is unavailable', error);
 		onStatus?.('unavailable');
-		return null;
+		throw new Error('Your saved disk could not be restored. It has not been changed.', { cause: error });
 	}
+	void navigator.storage?.persist?.().catch(() => false);
+	await publishReadyStatus();
 
 	function scheduleSave() {
 		if (disposed || saveTimer) return;
@@ -173,13 +156,11 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 		if (disposed || changeVersion === 0) return saveTask;
 		const version = changeVersion;
 		const state = serializableFilesystemState(filesystem);
-		const portableFiles = await readPortableFiles(filesystem);
 		saveTask = saveTask.then(async () => {
 			await saveRecord({
 				schema: DISK_RECORD_SCHEMA,
 				compatibilityId,
 				state,
-				portableFiles,
 			});
 			await publishReadyStatus();
 			if (changeVersion === version) changeVersion = 0;
@@ -210,7 +191,7 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 			disposed = true;
 			if (saveTimer) clearTimeout(saveTimer);
 			await saveTask;
-			await clearRecord();
+			await clearWebvmDisk();
 		},
 		flush,
 		dispose() {

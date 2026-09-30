@@ -10,6 +10,13 @@ const NVPN_SECRET_PATHS = [
 	'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret',
 ];
 const NVPN_SECRET_HASH_COMMAND = `sha256sum ${NVPN_SECRET_PATHS.join(' ')}`;
+const USER_FILE_CHECK = "test \"$(stat -c '%a:%u:%g' /home/saved/nested/private)\" = 600:123:456 && " +
+	"test \"$(readlink /root/saved-link)\" = /home/saved/nested/private && " +
+	"test \"$(stat -c %i /root/saved-hardlink)\" = \"$(stat -c %i /home/saved/nested/private)\" && " +
+	"grep -qx 'retained private file' /root/saved-link && " +
+	"grep -qx 'browser-local-data' /root/webvm-persistence-check";
+const HASHTREE_IDENTITY_CHECK = 'find /var/lib/hashtree/config/keys -type f ' +
+	'-exec sha256sum {} \\; -exec stat -c "%a:%u:%g" {} \\;';
 
 async function waitForTerminal(page) {
 	await page.waitForFunction(
@@ -70,8 +77,10 @@ async function savedDiskExists(page) {
 	});
 }
 
-async function invalidateSavedDiskCompatibility(page) {
-	await page.evaluate(async () => {
+async function invalidateSavedDiskCompatibility(page, breakReceipt = false) {
+	return page.evaluate(async (breakReceipt) => {
+		globalThis.irisWebvmV86.emulator.stop();
+		await globalThis.irisWebvmV86.flushDisk();
 		const database = await new Promise((resolve, reject) => {
 			const request = indexedDB.open('iris-webvm', 1);
 			request.onsuccess = () => resolve(request.result);
@@ -85,15 +94,18 @@ async function invalidateSavedDiskCompatibility(page) {
 			request.onerror = () => reject(request.error);
 		});
 		record.compatibilityId = 'previous-guest-release';
-		delete record.portableFiles?.['/var/lib/nvpn/config.toml'];
-		delete record.portableFiles?.['/var/lib/nvpn/.config.toml.nostr-secret-key.secret'];
-		delete record.portableFiles?.['/var/lib/nvpn/.config.toml.pending-join-request.secret'];
-		delete record.portableFiles?.[
-			'/var/lib/nvpn/.config.toml.wireguard-exit-peer-preshared-key.secret'
-		];
-		delete record.portableFiles?.[
-			'/var/lib/nvpn/.config.toml.wireguard-exit-private-key.secret'
-		];
+		delete record.portableFiles;
+		// A saved executable cache must not shadow the newly shipped binary.
+		const { id } = globalThis.irisWebvmV86.emulator.fs9p.SearchPath('/usr/local/bin/nvpn');
+		record.state[2] = record.state[2].filter(([inodeId]) => inodeId !== id);
+		record.state[2].push([id, new Uint8Array([0])]);
+		record.state[0][id][3] = 0;
+		record.state[0][id][4] = 1;
+		if (breakReceipt) {
+			const receipt = globalThis.irisWebvmV86.emulator.fs9p.SearchPath('/etc/webvm-guest-binaries.sha256');
+			record.state[0][receipt.id][0] = 0o120777;
+			record.state[0][receipt.id][1] = '/root/saved-user-file';
+		}
 		store.put(record, 'root-filesystem');
 		await new Promise((resolve, reject) => {
 			transaction.oncomplete = resolve;
@@ -101,10 +113,32 @@ async function invalidateSavedDiskCompatibility(page) {
 			transaction.onabort = () => reject(transaction.error);
 		});
 		database.close();
+		return Array.from(new Uint8Array(await crypto.subtle.digest(
+			'SHA-256', new TextEncoder().encode(JSON.stringify(record)),
+		)));
+	}, breakReceipt);
+}
+
+async function savedDiskFingerprint(page) {
+	return page.evaluate(async () => {
+		const database = await new Promise((resolve, reject) => {
+			const request = indexedDB.open('iris-webvm', 1);
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		const record = await new Promise((resolve, reject) => {
+			const request = database.transaction('disks').objectStore('disks').get('root-filesystem');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		database.close();
+		return Array.from(new Uint8Array(await crypto.subtle.digest(
+			'SHA-256', new TextEncoder().encode(JSON.stringify(record)),
+		)));
 	});
 }
 
-test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ page }) => {
+test('real v86 preserves saved files and service identities across a guest upgrade', async ({ page }, testInfo) => {
 	test.setTimeout(180_000);
 	await page.goto('/v86');
 	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
@@ -136,9 +170,16 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 
 	await runCommand(
 		page,
-		"printf 'browser-local-data\\n' > /root/webvm-persistence-check",
+		"printf 'browser-local-data\\n' > /root/webvm-persistence-check && " +
+			"mkdir -p /home/saved/nested && printf 'retained private file\\n' > /home/saved/nested/private && " +
+			'chmod 600 /home/saved/nested/private && chown 123:456 /home/saved/nested/private && ' +
+			'ln -s /home/saved/nested/private /root/saved-link && ' +
+			'ln /home/saved/nested/private /root/saved-hardlink',
 		'__FILE_WRITTEN__',
 	);
+	const expectedHashtreeIdentity = await runCommand(page, HASHTREE_IDENTITY_CHECK, '__HASHTREE_IDENTITY__');
+	expect(expectedHashtreeIdentity.length).toBeGreaterThan(0);
+	const manifest = await (await page.request.get('/v86/guest/manifest.json')).json();
 	await runCommand(
 		page,
 		"nvpn set --config /var/lib/nvpn/config.toml --node-name upgrade-fixture " +
@@ -191,10 +232,14 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 	expect(upgradedHistory).toContain('echo user-history-survives-refresh');
 	await runCommand(
 		page,
-		'test ! -e /root/webvm-persistence-check && echo upgrade-clean',
+		`${USER_FILE_CHECK} && echo upgrade-preserved`,
 		'__UPGRADE_CHECKED__',
 	);
-	await expect.poll(() => terminalText(page)).toContain('upgrade-clean');
+	await expect.poll(() => terminalText(page)).toContain('upgrade-preserved');
+	expect(await runCommand(page, HASHTREE_IDENTITY_CHECK, '__HASHTREE_IDENTITY_UPGRADED__'))
+		.toEqual(expectedHashtreeIdentity);
+	const binaryHash = await runCommand(page, 'sha256sum /usr/local/bin/nvpn', '__NVPN_BINARY_UPGRADED__');
+	expect(binaryHash).toEqual([`${manifest.binaries.nvpn.sha256}  /usr/local/bin/nvpn`]);
 	const upgradedNvpnState = await runCommand(
 		page,
 		"grep -F 'node_name = \"upgrade-fixture\"' /var/lib/nvpn/config.toml",
@@ -231,4 +276,18 @@ test('real v86 preserves ordinary nVPN state across a guest upgrade', async ({ p
 		'__NVPN_RESET_CHECKED__',
 	);
 	expect(resetNvpnState[0]).not.toEqual(expectedSecretHashes[0]);
+
+	// Fail on the second shipped file, after the in-memory binary was patched.
+	// No partial upgrade may replace the persistent record, and Reset still works.
+	const savedDiskBeforeFailure = await invalidateSavedDiskCompatibility(page, true);
+	await page.reload();
+	await expect.poll(() => page.evaluate(() => globalThis.irisWebvmV86?.state().vmState))
+		.toBe('load-failed');
+	await expect.poll(() => terminalText(page)).toContain('It has not been changed.');
+	expect(await savedDiskFingerprint(page)).toEqual(savedDiskBeforeFailure);
+	await page.screenshot({ path: testInfo.outputPath('disk-restore-failed.png') });
+	page.once('dialog', (dialog) => dialog.accept());
+	await Promise.all([page.waitForEvent('load'), page.getByTestId('v86-reset').click()]);
+	await waitForTerminal(page);
+	await expect(page.getByLabel('WebVM controls')).toContainText('Local disk');
 });
