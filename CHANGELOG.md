@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.8 - 2026-09-30
+
+- Wait for durable event delivery before completing Nostr history requests.
+- Preserve the browser host identity and saved guest disks during the shared runtime upgrade.
+
 ## 2.0.7 - 2026-09-06
 
 - Warm coordinates when browser traffic changes transit paths and accept coordinate
