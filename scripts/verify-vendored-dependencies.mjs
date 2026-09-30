@@ -40,11 +40,11 @@ const APPROVED_PACKAGES = [
 	},
 	{
 		name: 'nostr-pubsub',
-		version: '0.5.6',
-		path: 'vendor/nostr-pubsub-0.5.6.tgz',
-		url: 'https://github.com/mmalmi/nostr-pubsub/releases/download/nostr-pubsub-ts-v0.5.6/nostr-pubsub-0.5.6.tgz',
-		sha256: 'bb6393efc49950b65c771e06474bb7cdd8519cdb67d422997d269dbd4ca48a44',
-		sha512: '4IcGvXxchQ4P/NhATMiVuVXKfmLg6kvsq9lNZlIyOvqcFwzEQepiCvlErl6+11SHrH+hb0MpyMLcemWs9IkFMQ==',
+		version: '0.5.11',
+		path: 'vendor/nostr-pubsub-0.5.11.tgz',
+		url: 'https://github.com/mmalmi/nostr-pubsub/releases/download/nostr-pubsub-ts-v0.5.11/nostr-pubsub-0.5.11.tgz',
+		sha256: '0bd083c8ecbc9625618505306c577e2076e2c81e16ec1fa73591a0b0c0a953da',
+		sha512: 'wyHDPvyDPSQo6JRuof5tx5Mn2WdA6W6asiGR+VEKF9hRKGNfobAcbWlShGtCmJFLa/tjAVj8vY5tGbxfrgOJrQ==',
 	},
 ];
 const APPROVED_REMOTE_PACKAGES = [

@@ -122,8 +122,11 @@ test('WebVM bounds relay replay until an authenticated local peer is admitted', 
 	expect(bridge.stats.droppedDeferredRelayEvents).toBe(16);
 
 	admittedPeers = [peerId];
-	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
 	bridge.refreshPeers();
+	await settle(bridge, guest);
+	// Subscribe after the deferred events are retained: the filter limit bounds
+	// history, while events arriving during a live subscription are unbounded.
+	guest.subscribe(FILTERS, (incoming) => received.push(incoming.id));
 	await settle(bridge, guest);
 	expect(received).toHaveLength(FILTERS[0].limit);
 	expect(bridge.stats.deferredRelayEvents).toBe(0);
