@@ -174,7 +174,7 @@ test('v86 boots only same-origin guest assets and starts the generic FIPS host',
 	expect(state.options.bzimage).toBeUndefined();
 	expect(state.options.cmdline).toContain('root=host9p');
 	expect(state.hostCalls).toEqual([{ sameEmulator: true }]);
-	expect(state.ran).toBe(true);
+	await expect.poll(() => page.evaluate(() => window.__v86RouteTestState.ran)).toBe(true);
 });
 
 test('v86 presents one WebVM-style terminal and never reveals cold-boot output', async ({ page }) => {

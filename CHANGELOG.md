@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.10 - 2026-09-30
+
+- Use paths with enough capacity for peer connection messages and recover authenticated peer connections sooner.
+- Preserve the existing guest image, saved disks, and browser identity.
+
 ## 2.0.9 - 2026-09-30
 
 - Update the shared event runtime with interoperable relay filter batches.
