@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.11 - 2026-10-01
+
+- Improve peer handshake recovery, routing restarts, and browser connection cleanup with FIPS runtime 0.0.48.
+
 ## 2.0.10 - 2026-09-30
 
 - Use paths with enough capacity for peer connection messages and recover authenticated peer connections sooner.
