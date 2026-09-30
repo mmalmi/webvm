@@ -4,6 +4,9 @@ import { createHash } from 'node:crypto';
 import { createV86EthernetFramePort } from '../../src/lib/v86EthernetFramePort.js';
 import { WEBVM_MEMORY_BYTES } from '../../src/lib/webvmGuestConfig.js';
 
+// Mocked asset requests must reach Playwright rather than the real guest cache.
+test.use({ serviceWorkers: 'block' });
+
 test('legacy upstream WebVM routes and assets are not published', async ({ request }) => {
 	for (const path of [
 		'/alpine',

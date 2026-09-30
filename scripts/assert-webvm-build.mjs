@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
+	'build/service-worker.js',
 	'build/favicon.ico',
 	'build/v86/v86.wasm',
 	'build/v86/seabios.bin',

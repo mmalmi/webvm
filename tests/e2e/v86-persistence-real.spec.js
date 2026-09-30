@@ -138,6 +138,54 @@ async function savedDiskFingerprint(page) {
 	});
 }
 
+test('real v86 reopens offline with saved files and service identities', async ({ page, context }, testInfo) => {
+	test.setTimeout(150_000);
+	await page.goto('/v86');
+	await waitForTerminal(page);
+	await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+	await runCommand(page,
+		"printf 'offline workspace\\n' > /root/offline-file && chmod 600 /root/offline-file && " +
+			'curl --version >/dev/null', '__OFFLINE_FILE_SAVED__');
+	const hashtree = await runCommand(page, HASHTREE_IDENTITY_CHECK, '__OFFLINE_HASHTREE_IDENTITY__');
+	expect(hashtree.length).toBeGreaterThan(0);
+	const nvpn = await runCommand(page,
+		'for i in $(seq 1 30); do test -s /var/lib/nvpn/.config.toml.nostr-secret-key.secret && break; sleep 1; done; ' +
+			'sha256sum /var/lib/nvpn/.config.toml.nostr-secret-key.secret', '__OFFLINE_NVPN_IDENTITY__');
+	const identity = await page.evaluate(() => localStorage.getItem('iris-webvm:fips-host-identity:v1'));
+	expect(identity).toMatch(/^[0-9a-f]{64}$/u);
+	const cachesBefore = await page.evaluate(async () => {
+		const cache = await caches.open('iris-webvm:rootfs-v1');
+		return (await cache.keys()).map((request) => new URL(request.url).pathname);
+	});
+	expect(cachesBefore.length).toBeGreaterThan(0);
+	// Lazy reads must not turn into a download of the complete 1,000+ file guest.
+	expect(cachesBefore.length).toBeLessThan(200);
+	await page.evaluate(async () => {
+		globalThis.irisWebvmV86.emulator.stop();
+		await globalThis.irisWebvmV86.flushDisk();
+	});
+	await context.setOffline(true);
+	await page.reload();
+	await waitForTerminal(page);
+	await runCommand(page,
+		"test \"$(stat -c %a /root/offline-file)\" = 600 && grep -qx 'offline workspace' /root/offline-file && " +
+			'curl --version >/dev/null', '__OFFLINE_FILE_RESTORED__');
+	expect(await runCommand(page, HASHTREE_IDENTITY_CHECK, '__OFFLINE_HASHTREE_RESTORED__')).toEqual(hashtree);
+	expect(await runCommand(page, 'sha256sum /var/lib/nvpn/.config.toml.nostr-secret-key.secret',
+		'__OFFLINE_NVPN_RESTORED__')).toEqual(nvpn);
+	expect(await page.evaluate(() => localStorage.getItem('iris-webvm:fips-host-identity:v1'))).toBe(identity);
+	await runCommand(page, "printf 'written offline\\n' >> /root/offline-file", '__OFFLINE_EDIT_SAVED__');
+	await page.evaluate(async () => {
+		globalThis.irisWebvmV86.emulator.stop();
+		await globalThis.irisWebvmV86.flushDisk();
+	});
+	await page.reload();
+	await waitForTerminal(page);
+	await runCommand(page, "grep -qx 'written offline' /root/offline-file", '__OFFLINE_EDIT_RESTORED__');
+	await page.screenshot({ path: testInfo.outputPath('offline-workspace.png') });
+	await testInfo.attach('offline-cache', { body: JSON.stringify({ rootfsFiles: cachesBefore.length }), contentType: 'application/json' });
+});
+
 test('real v86 preserves saved files and service identities across a guest upgrade', async ({ page }, testInfo) => {
 	test.setTimeout(180_000);
 	await page.goto('/v86');

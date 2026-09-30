@@ -7,6 +7,7 @@
 - Update the guest to nVPN 4.1.17 and FIPS 0.4.85.
 - Preserve the whole saved filesystem, including service keys, permissions, and links, during guest updates.
 - Leave the saved disk intact and show a clear error if an update cannot be applied.
+- Reopen a previously loaded workspace offline, retaining saved files, service keys, and downloaded guest files.
 
 ## 2.0.9 - 2026-09-30
 

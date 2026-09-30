@@ -6,6 +6,7 @@
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 	import { attachWebvmDisk, clearWebvmDisk } from '$lib/webvmDisk.js';
 	import { installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
+	import { prepareWebvmOffline } from '$lib/webvmOffline.js';
 	import { WEBVM_MEMORY_BYTES } from '$lib/webvmGuestConfig.js';
 	import '$lib/global.css';
 	import '@xterm/xterm/css/xterm.css';
@@ -322,6 +323,7 @@ ${WELCOME_BORDER}
 		vmSummary = 'Loading WebVM';
 		vmError = '';
 		const rawSerialConsole = document.createElement('textarea');
+		await prepareWebvmOffline();
 		const statePromise = loadPreinitializedState().catch((error) => {
 			console.error('Preinitialized WebVM state is unavailable; using a cold boot', error);
 			return null;
