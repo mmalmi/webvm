@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.9 - 2026-09-30
+
+- Update the shared event runtime with interoperable relay filter batches.
+- Preserve saved guest disks, browser identity, and existing FIPS transport versions.
+
 ## 2.0.8 - 2026-09-30
 
 - Wait for durable event delivery before completing Nostr history requests.
