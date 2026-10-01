@@ -1,3 +1,5 @@
+import { WEBVM_GUEST_CHECKSUMS, WEBVM_GUEST_TOOLS } from './webvmGuestTools.js';
+
 const DATABASE_NAME = 'iris-webvm';
 const DATABASE_VERSION = 1;
 const DISK_RECORD_SCHEMA = 2;
@@ -203,4 +205,3 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 		},
 	};
 }
-import { WEBVM_GUEST_CHECKSUMS, WEBVM_GUEST_TOOLS } from './webvmGuestTools.js';
