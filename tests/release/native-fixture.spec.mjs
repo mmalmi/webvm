@@ -84,6 +84,21 @@ test('native gate attests an explicit clean public source and registry FIPS rele
 
 		run('git', ['update-ref', '-d', 'refs/remotes/github/master'], fixture.repository);
 		assert.throws(() => inspectNativeFixture(env), /canonical public remote/u);
+		const publicRef = 'refs/heads/codex/seed-fips-089';
+		// Exercise actual Git readback locally; never contact a public service in this test.
+		run('git', ['config', `url.${fixture.repository}.insteadOf`,
+			'https://github.com/mmalmi/nostr-vpn.git'], fixture.repository);
+		run('git', ['update-ref', publicRef, fixture.commit], fixture.repository);
+		const branchEnv = { ...env, NVPN_WEBVM_NATIVE_PUBLIC_REF: publicRef };
+		assert.equal(inspectNativeFixture(branchEnv).publicRef, publicRef);
+		assert.throws(() => inspectNativeFixture({ ...branchEnv, NVPN_WEBVM_NATIVE_PUBLIC_REF: 'HEAD' }), /full branch ref/u);
+		run('git', ['commit', '--quiet', '--allow-empty', '-m', 'different public tip'], fixture.repository);
+		const different = run('git', ['rev-parse', 'HEAD'], fixture.repository);
+		run('git', ['update-ref', publicRef, different], fixture.repository);
+		run('git', ['checkout', '--quiet', '--detach', fixture.commit], fixture.repository);
+		assert.throws(() => inspectNativeFixture(branchEnv), /does not match/u);
+		run('git', ['update-ref', '-d', publicRef], fixture.repository);
+		assert.throws(() => inspectNativeFixture(branchEnv));
 		const candidateEnv = { ...env, NVPN_WEBVM_NATIVE_SOURCE_MODE: 'candidate' };
 		assert.equal(inspectNativeFixture(candidateEnv).sourceMode, 'candidate');
 		writeFileSync(fixture.manifest, '[package]\nname = "dirty"\n');

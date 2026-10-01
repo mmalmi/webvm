@@ -71,6 +71,10 @@ For a local release candidate, set `NVPN_WEBVM_NATIVE_SOURCE_MODE=candidate`.
 This accepts an unpublished commit while still requiring a clean repository,
 the exact source commit, matching binary version, and checksummed registry FIPS dependencies.
 Published-source verification remains the default and is required for deployment.
+When the verified native release is on a public feature branch, set
+`NVPN_WEBVM_NATIVE_PUBLIC_REF=refs/heads/codex/seed-fips-089`. The fixture checks
+that branch's current commit directly on the canonical public GitHub repository;
+an absent or different tip fails verification.
 
 The private-exit acceptance test allows one minute for automatic exit selection.
 It then requires a complete `apk update` before the DNS and HTTP checks warm the
@@ -99,6 +103,21 @@ npm run state:build
 ```
 
 Generated guest artifacts live under `custom-disk-images/v86-guest` and are intentionally excluded from Git.
+
+For a tools-only update, use `node scripts/replace-v86-guest-tools.mjs <artifacts.json>`.
+The input selects a nonempty subset of `nvpn`, `htree`, and `gitRemoteHtree` under
+`binaries`, each with `path`, `sha256`, and `version` from its verified i386 build
+receipt. Its `sources` names the clean `repository` and exact `commit` for `fips`
+and the selected tools' `nvpn` or `hashtree` sources. The current clean WebVM
+source is recorded automatically. Missing artifact values are errors.
+
+The tool stages the content-addressed files and checksum receipt together, then
+keeps the previous complete guest under `work/guest-tool-upgrades` when replacing
+the generated image. Run `npm run state:build` afterward; the previous saved state
+will fail the manifest check until recaptured. Existing browser disks receive
+only the three shipped tools and their checksum receipt, retaining user files,
+keys, permissions, links, and history. A failed upgrade leaves the saved record
+unchanged. Run the release and saved-profile upgrade checks before deployment.
 
 ## Deployment
 

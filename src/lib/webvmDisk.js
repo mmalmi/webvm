@@ -2,8 +2,7 @@ const DATABASE_NAME = 'iris-webvm';
 const DATABASE_VERSION = 1;
 const DISK_RECORD_SCHEMA = 2;
 const SYSTEM_UPDATE_PATHS = [
-	'/usr/local/bin/nvpn',
-	'/etc/webvm-guest-binaries.sha256',
+	...Object.values(WEBVM_GUEST_TOOLS), WEBVM_GUEST_CHECKSUMS,
 ];
 const RECORD_KEY = 'root-filesystem';
 const SAVE_DELAY_MS = 1_000;
@@ -89,8 +88,8 @@ function systemFile(filesystem, filePath) {
 
 function upgradeFilesystem(filesystem, state) {
 	// Restore the complete disk, including links, permissions and service keys.
-	// Only these two shipped files change in this guest update. Keep their fresh
-	// content-addressed backing so the new binary is still loaded on demand.
+	// Replace only the shipped tools and their receipt. Keep their fresh
+	// content-addressed backing so the binaries are still loaded on demand.
 	const updates = SYSTEM_UPDATE_PATHS.map((filePath) => {
 		const { id, inode } = systemFile(filesystem, filePath);
 		const metadata = Object.fromEntries([
@@ -204,3 +203,4 @@ export async function attachWebvmDisk({ compatibilityId, filesystem, onStatus })
 		},
 	};
 }
+import { WEBVM_GUEST_CHECKSUMS, WEBVM_GUEST_TOOLS } from './webvmGuestTools.js';

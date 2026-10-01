@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
 
+import { WEBVM_GUEST_TOOLS } from '../../src/lib/webvmGuestTools.js';
 import { parseSerialCommandResult } from './helpers/webvm-serial-command.js';
 
 const NVPN_SECRET_PATHS = [
@@ -78,7 +79,7 @@ async function savedDiskExists(page) {
 }
 
 async function invalidateSavedDiskCompatibility(page, breakReceipt = false) {
-	return page.evaluate(async (breakReceipt) => {
+	return page.evaluate(async ({ breakReceipt, toolPaths }) => {
 		globalThis.irisWebvmV86.emulator.stop();
 		await globalThis.irisWebvmV86.flushDisk();
 		const database = await new Promise((resolve, reject) => {
@@ -95,12 +96,14 @@ async function invalidateSavedDiskCompatibility(page, breakReceipt = false) {
 		});
 		record.compatibilityId = 'previous-guest-release';
 		delete record.portableFiles;
-		// A saved executable cache must not shadow the newly shipped binary.
-		const { id } = globalThis.irisWebvmV86.emulator.fs9p.SearchPath('/usr/local/bin/nvpn');
-		record.state[2] = record.state[2].filter(([inodeId]) => inodeId !== id);
-		record.state[2].push([id, new Uint8Array([0])]);
-		record.state[0][id][3] = 0;
-		record.state[0][id][4] = 1;
+		// Saved executable caches must not shadow any newly shipped tool.
+		for (const toolPath of toolPaths) {
+			const { id } = globalThis.irisWebvmV86.emulator.fs9p.SearchPath(toolPath);
+			record.state[2] = record.state[2].filter(([inodeId]) => inodeId !== id);
+			record.state[2].push([id, new Uint8Array([0])]);
+			record.state[0][id][3] = 0;
+			record.state[0][id][4] = 1;
+		}
 		if (breakReceipt) {
 			const receipt = globalThis.irisWebvmV86.emulator.fs9p.SearchPath('/etc/webvm-guest-binaries.sha256');
 			record.state[0][receipt.id][0] = 0o120777;
@@ -116,7 +119,7 @@ async function invalidateSavedDiskCompatibility(page, breakReceipt = false) {
 		return Array.from(new Uint8Array(await crypto.subtle.digest(
 			'SHA-256', new TextEncoder().encode(JSON.stringify(record)),
 		)));
-	}, breakReceipt);
+	}, { breakReceipt, toolPaths: Object.values(WEBVM_GUEST_TOOLS) });
 }
 
 async function savedDiskFingerprint(page) {
@@ -286,8 +289,10 @@ test('real v86 preserves saved files and service identities across a guest upgra
 	await expect.poll(() => terminalText(page)).toContain('upgrade-preserved');
 	expect(await runCommand(page, HASHTREE_IDENTITY_CHECK, '__HASHTREE_IDENTITY_UPGRADED__'))
 		.toEqual(expectedHashtreeIdentity);
-	const binaryHash = await runCommand(page, 'sha256sum /usr/local/bin/nvpn', '__NVPN_BINARY_UPGRADED__');
-	expect(binaryHash).toEqual([`${manifest.binaries.nvpn.sha256}  /usr/local/bin/nvpn`]);
+	const binaryHashes = await runCommand(page,
+		`sha256sum ${Object.values(WEBVM_GUEST_TOOLS).join(' ')}`, '__GUEST_TOOLS_UPGRADED__');
+	expect(binaryHashes).toEqual(Object.entries(WEBVM_GUEST_TOOLS)
+		.map(([name, filePath]) => `${manifest.binaries[name].sha256}  ${filePath}`));
 	const upgradedNvpnState = await runCommand(
 		page,
 		"grep -F 'node_name = \"upgrade-fixture\"' /var/lib/nvpn/config.toml",
@@ -325,7 +330,7 @@ test('real v86 preserves saved files and service identities across a guest upgra
 	);
 	expect(resetNvpnState[0]).not.toEqual(expectedSecretHashes[0]);
 
-	// Fail on the second shipped file, after the in-memory binary was patched.
+	// Fail on the checksum receipt, after the in-memory tools were patched.
 	// No partial upgrade may replace the persistent record, and Reset still works.
 	const savedDiskBeforeFailure = await invalidateSavedDiskCompatibility(page, true);
 	await page.reload();

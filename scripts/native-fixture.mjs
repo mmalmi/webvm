@@ -10,7 +10,7 @@ function required(env, name) {
 }
 
 function run(command, args, cwd) {
-	return execFileSync(command, args, { cwd, encoding: 'utf8' }).trim();
+	return execFileSync(command, args, { cwd, encoding: 'utf8', timeout: 30_000 }).trim();
 }
 
 function regularFile(value, name, { executable = false } = {}) {
@@ -109,9 +109,19 @@ export function inspectNativeFixture(env = process.env) {
 		`--contains=${expectedCommit}`,
 		'refs/remotes',
 	]).split('\n').filter(Boolean);
-	if (sourceMode === 'published'
-		&& !publicRefs.some((ref) => /^refs\/remotes\/(?:github|origin)\/(?:main|master)$/u.test(ref))) {
-		throw new Error(`${expectedCommit} is not present on a canonical public remote-tracking branch`);
+	const publicRef = env.NVPN_WEBVM_NATIVE_PUBLIC_REF?.trim();
+	if (sourceMode === 'published') {
+		if (publicRef) {
+			if (!publicRef.startsWith('refs/heads/')) throw new Error('Native public ref must be a full branch ref');
+			run('git', ['check-ref-format', publicRef], repository);
+			const published = run('git', ['ls-remote', '--exit-code', '--refs',
+				'https://github.com/mmalmi/nostr-vpn.git', publicRef], repository);
+			if (published !== `${expectedCommit}\t${publicRef}`) {
+				throw new Error(`Native public ref does not match ${expectedCommit}`);
+			}
+		} else if (!publicRefs.some((ref) => /^refs\/remotes\/(?:github|origin)\/(?:main|master)$/u.test(ref))) {
+			throw new Error(`${expectedCommit} is not present on a canonical public remote-tracking branch`);
+		}
 	}
 
 	const workspaceManifest = readFileSync(path.join(repository, 'Cargo.toml'), 'utf8');
@@ -144,6 +154,7 @@ export function inspectNativeFixture(env = process.env) {
 		sourceCommit,
 		sourceMode,
 		publicRefs,
+		publicRef,
 		nvpnVersion,
 		nvpnSha256,
 		fipsCore,
