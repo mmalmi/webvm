@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.12 - 2026-10-01
+
+- Keep peer connections and transfers working when a delayed connection offer arrives.
+
 ## 2.0.11 - 2026-10-01
 
 - Improve peer handshake recovery, routing restarts, and browser connection cleanup with FIPS runtime 0.0.48.

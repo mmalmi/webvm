@@ -24,11 +24,11 @@ const APPROVED_PACKAGES = [
 	},
 	{
 		name: '@fips/transport-webrtc',
-		version: '0.0.51',
-		path: 'vendor/fips/fips-transport-webrtc-0.0.51.tgz',
-		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.48/fips-transport-webrtc-0.0.51.tgz',
-		sha256: 'e38748834e63f8e66ac2f4dd5a009b2bc2db97813bd378a9d3fee71ce9448d6e',
-		sha512: 'hDUvPHo7wolA/unWR8xiPpR2lLl7ECq4ut29QhdMxcEAeKNN03aBVe2BAyMWzRSdZmt3K6P1cbixSvuoQK2oAw==',
+		version: '0.0.52',
+		path: 'vendor/fips/fips-transport-webrtc-0.0.52.tgz',
+		url: 'https://github.com/mmalmi/fips-ts/releases/download/runtime-v0.0.49/fips-transport-webrtc-0.0.52.tgz',
+		sha256: '5eb7d3a9ab9716793ac3dd9cab3e3547ae91d48a7dfc927f06fc6a9635a04563',
+		sha512: 'VT22nF8LqxjXcl8cVq/8k7xcK8c0QNXoxB3pXZ7yMI+da7LkUACjc8pIkYPCZYuIjuXuIhNzNEFYbYalGRyzTw==',
 	},
 	{
 		name: '@fips/transport-websocket',
