@@ -12,7 +12,7 @@ import {
 test('live approval builds with pinned dependencies before running the prepared executable', async (t) => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'webvm-approval-'));
 	const repository = path.join(directory, 'native');
-	const cargo = path.join(directory, 'cargo');
+	const cargo = path.join(directory, 'cargo.cjs');
 	const executable = path.join(directory, 'approval');
 	const buildArguments = path.join(directory, 'build.json');
 	const previousCargo = process.env.CARGO;
