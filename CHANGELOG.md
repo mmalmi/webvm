@@ -1,8 +1,9 @@
 # Changelog
 
-## 2.0.12 - 2026-10-01
+## 2.0.12 - 2026-10-04
 
-- Keep peer connections and transfers working when a delayed connection offer arrives.
+- Recover peer connections after a reload or delayed connection offer.
+- Preserve saved workspaces and service keys through the shared networking update.
 
 ## 2.0.11 - 2026-10-01
 
