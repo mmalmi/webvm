@@ -143,7 +143,7 @@ async function savedDiskFingerprint(page) {
 
 test('real v86 reopens offline with saved files and service identities', async ({ page, context }, testInfo) => {
 	test.setTimeout(150_000);
-	await page.goto('/v86');
+	await page.goto('/v86?webvm-e2e=1');
 	await waitForTerminal(page);
 	await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
 	await runCommand(page,
@@ -191,7 +191,7 @@ test('real v86 reopens offline with saved files and service identities', async (
 
 test('real v86 preserves saved files and service identities across a guest upgrade', async ({ page }, testInfo) => {
 	test.setTimeout(180_000);
-	await page.goto('/v86');
+	await page.goto('/v86?webvm-e2e=1');
 	await expect(page.getByTestId('v86-serial').locator('.xterm-rows'))
 		.toContainText('Starting FIPS networking...');
 	await waitForTerminal(page);
