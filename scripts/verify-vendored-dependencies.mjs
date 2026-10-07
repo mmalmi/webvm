@@ -50,11 +50,11 @@ const APPROVED_PACKAGES = [
 const APPROVED_REMOTE_PACKAGES = [
 	{
 		name: '@fips/tcp',
-		version: '0.2.0',
-		asset: 'fips-tcp-0.2.0.tgz',
-		url: 'https://github.com/mmalmi/fips-tcp/releases/download/v0.2.0/fips-tcp-0.2.0.tgz',
-		sha256: '0df4dae9aaa388752636c867b27384881aa62e04fb74e67cb48fae04d35c1d05',
-		sha512: 'KCJmltpx4cH76Sp+GOKJvYzQpwUTUtmyBA5bgcfS36ty8AxSgBQZxLdBwM59IER+B/rZpjRYFtqE6MPePL0o+w==',
+		version: '0.2.3',
+		asset: 'fips-tcp-0.2.3.tgz',
+		url: 'https://github.com/mmalmi/fips-tcp/releases/download/fips-tcp-v0.2.4/fips-tcp-0.2.3.tgz',
+		sha256: '72fe87d554cffde23d2c34f779f3b8cebdca3f54f33878ca5e3b147a36681904',
+		sha512: '0j7ucAgb7SFLkHHKMjJmR4v29psVmGoShiSgpba5IgJqAT/lJGTTKlHoAItKie+oNsiPGf/ww4YMuLTRYov2TA==',
 	},
 ];
 
