@@ -6,6 +6,7 @@ playwright-report/
 test-results/
 custom-disk-images/*
 !custom-disk-images/.gitkeep
+/work/guest-tool-upgrades/
 nginx_access.log
 nginx_error.log
 nginx_main_error.log
