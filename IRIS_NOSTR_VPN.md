@@ -33,6 +33,13 @@ npm run test:e2e
 
 The guest builder compiles static i686 binaries, emits `fs.json` plus content-addressed zstd chunks, and captures the identity-free logged-in state under `custom-disk-images/v86-guest`. Run `npm run state:build` by itself when only the WebVM state needs to be recaptured.
 
+For the VPN binary, check out the nVPN source commit pinned in
+`scripts/assert-v86-guest-assets.mjs`. From that clean checkout, run
+`NVPN_LINUX_MUSL_NO_DEFAULT_FEATURES=1 NVPN_LINUX_MUSL_STRIP=1 bash scripts/build-nvpn-linux-musl i686-unknown-linux-musl`.
+The guest runs the 4.1.22 code with native FIPS 0.4.117 and supports an empty
+upstream DNS configuration before pairing. The asset check verifies the source
+commits and binary checksum before a release.
+
 ## Deployment
 
 ```sh

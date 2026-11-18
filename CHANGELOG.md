@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.13 - Unreleased
+
+- Update the browser's FIPS runtime to 0.0.62.
+- Start the Linux VPN service and accept join requests when the guest has no upstream DNS server.
+
 ## 2.0.12 - 2026-10-04
 
 - Recover peer connections after a reload or delayed connection offer.

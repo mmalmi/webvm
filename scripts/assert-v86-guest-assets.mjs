@@ -54,6 +54,13 @@ if (manifest.binaries.nvpn.bytes > 55 * 1024 * 1024) {
 	throw new Error('WebVM nVPN binary includes features outside the minimal guest profile');
 }
 
+// Pin the minimal Linux VPN separately from the native approval client.
+if (manifest.sources.nvpn.commit !== 'f02b90afad67db09a9015f424e69bf1876e21e5d' ||
+	manifest.sources.fips.commit !== 'd0b18f2d1b2e97d42fa8460a0c70a8dffeaa2552' ||
+	manifest.binaries.nvpn.sha256 !== '3527e245d9e0b6759e0684ca0c365cb3ea2923081d41c247d7fa378460de87ac') {
+	throw new Error('The guest image must contain the pinned offline-capable Linux nVPN build');
+}
+
 const actualArtifacts = {
 	fsJson: await fileRecord(path.join(outputDirectory, 'fs.json')),
 	rootfs: await treeRecord(path.join(outputDirectory, 'rootfs')),
