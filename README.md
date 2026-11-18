@@ -72,9 +72,10 @@ This accepts an unpublished commit while still requiring a clean repository,
 the exact source commit, matching binary version, and checksummed registry FIPS dependencies.
 Published-source verification remains the default and is required for deployment.
 When the verified native release is on a public feature branch, set
-`NVPN_WEBVM_NATIVE_PUBLIC_REF=refs/heads/codex/seed-fips-089`. The fixture checks
-that branch's current commit directly on the canonical public GitHub repository;
-an absent or different tip fails verification.
+`NVPN_WEBVM_NATIVE_PUBLIC_REF=refs/heads/codex/seed-fips-089`. For a tagged
+release, use its full ref, for example `refs/tags/v4.1.22`. The fixture resolves
+the ref on the canonical public GitHub repository and requires it to match
+`NVPN_WEBVM_NATIVE_SOURCE_SHA`.
 
 The private-exit acceptance test allows one minute for automatic exit selection.
 It then requires a complete `apk update` before the DNS and HTTP checks warm the

@@ -13,12 +13,19 @@ function run(command, args, cwd) {
 	return execFileSync(command, args, { cwd, encoding: 'utf8' }).trim();
 }
 
-function fixtureRepository() {
+function fixtureRepository({ directPackageNames = false } = {}) {
 	const repository = mkdtempSync(path.join(tmpdir(), 'iris-webvm-native-fixture-'));
 	mkdirSync(path.join(repository, 'crates/nostr-vpn-app-core'), { recursive: true });
 	writeFileSync(path.join(repository, 'Cargo.toml'), `[workspace]\nmembers = ["crates/nostr-vpn-app-core"]\n\n[workspace.package]\nversion = "4.0.94"\n\n[workspace.dependencies]\nfips-core = { package = "nvpn-fips-core", version = "=0.4.4" }\nfips-endpoint = { package = "nvpn-fips-endpoint", version = "=0.4.4" }\n`);
 	writeFileSync(path.join(repository, 'Cargo.lock'), `version = 4\n\n[[package]]\nname = "nvpn-fips-core"\nversion = "0.4.4"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${FIPS_CHECKSUM}"\n\n[[package]]\nname = "nvpn-fips-endpoint"\nversion = "0.4.4"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${FIPS_CHECKSUM}"\n`);
 	const manifest = path.join(repository, 'crates/nostr-vpn-app-core/Cargo.toml');
+	if (directPackageNames) {
+		const workspace = path.join(repository, 'Cargo.toml');
+		writeFileSync(workspace, readFileSync(workspace, 'utf8').replace(
+			/^fips-(core|endpoint) = \{ package = "nvpn-fips-\1",/gmu,
+			'nvpn-fips-$1 = {',
+		));
+	}
 	writeFileSync(manifest, '[package]\nname = "nostr-vpn-app-core"\nversion.workspace = true\n');
 	const binary = path.join(repository, 'nvpn');
 	writeFileSync(binary, '#!/bin/sh\nprintf "nvpn 4.0.94\\n"\n');
@@ -38,6 +45,30 @@ test('native gate rejects implicit fixture discovery', () => {
 		() => inspectNativeFixture({}),
 		/NVPN_WEBVM_NVPN_BIN is required/u,
 	);
+});
+
+test('native gate verifies the commit behind a published release tag and its registry packages', () => {
+	const f = fixtureRepository({ directPackageNames: true });
+	try {
+		run('git', ['config', `url.${f.repository}.insteadOf`, 'https://github.com/mmalmi/nostr-vpn.git'], f.repository);
+		const env = {
+			NVPN_WEBVM_NVPN_BIN: f.binary,
+			NVPN_APP_CORE_MANIFEST: f.manifest,
+			NVPN_WEBVM_NATIVE_SOURCE_SHA: f.commit,
+			NVPN_WEBVM_FIPS_VERSION: '0.4.4',
+			NVPN_WEBVM_NATIVE_PUBLIC_REF: 'refs/tags/v4.0.94',
+		};
+		for (const args of [['v4.0.94'], ['-f', '-a', '-m', 'release', 'v4.0.94']]) {
+			run('git', ['tag', ...args, f.commit], f.repository);
+			assert.equal(inspectNativeFixture(env).fipsCore.checksum, FIPS_CHECKSUM);
+		}
+		run('git', ['commit', '--quiet', '--allow-empty', '-m', 'different source'], f.repository);
+		assert.throws(() => inspectNativeFixture({
+			...env, NVPN_WEBVM_NATIVE_SOURCE_SHA: run('git', ['rev-parse', 'HEAD'], f.repository),
+		}), /does not match/u);
+	} finally {
+		rmSync(f.repository, { recursive: true, force: true });
+	}
 });
 
 test('guest builder rejects implicit sibling repositories and binaries', () => {

@@ -44,12 +44,11 @@ function section(source, name) {
 }
 
 function exactDependency(source, name) {
-	const line = section(source, 'workspace.dependencies')
-		.split('\n')
-		.find((candidate) => candidate.trimStart().startsWith(`${name} =`));
+	const declarations = section(source, 'workspace.dependencies').split('\n');
+	const line = declarations.find((candidate) => [name, `nvpn-${name}`].includes(candidate.split('=')[0].trim()));
 	const version = line?.match(/(?:version\s*=\s*)?"=([^"]+)"/u)?.[1];
 	if (!version) throw new Error(`${name} must be exactly pinned in native workspace dependencies`);
-	return { name: line.match(/package\s*=\s*"([^"]+)"/u)?.[1] || name, version };
+	return { name: line.match(/package\s*=\s*"([^"]+)"/u)?.[1] || line.split('=')[0].trim(), version };
 }
 
 function lockRecord(source, name) {
@@ -112,11 +111,16 @@ export function inspectNativeFixture(env = process.env) {
 	const publicRef = env.NVPN_WEBVM_NATIVE_PUBLIC_REF?.trim();
 	if (sourceMode === 'published') {
 		if (publicRef) {
-			if (!publicRef.startsWith('refs/heads/')) throw new Error('Native public ref must be a full branch ref');
+			if (!/^refs\/(?:heads|tags)\//u.test(publicRef)) throw new Error('Native public ref must be a full branch ref or release tag ref');
 			run('git', ['check-ref-format', publicRef], repository);
-			const published = run('git', ['ls-remote', '--exit-code', '--refs',
-				'https://github.com/mmalmi/nostr-vpn.git', publicRef], repository);
-			if (published !== `${expectedCommit}\t${publicRef}`) {
+			const peeled = `${publicRef}^{}`;
+			const published = run('git', ['ls-remote', '--exit-code',
+				'https://github.com/mmalmi/nostr-vpn.git', publicRef, peeled], repository);
+			const refs = new Map(published.split('\n').map((line) => {
+				const [commit, ref] = line.split('\t');
+				return [ref, commit];
+			}));
+			if ((refs.get(peeled) || refs.get(publicRef)) !== expectedCommit) {
 				throw new Error(`Native public ref does not match ${expectedCommit}`);
 			}
 		} else if (!publicRefs.some((ref) => /^refs\/remotes\/(?:github|origin)\/(?:main|master)$/u.test(ref))) {
