@@ -4,7 +4,7 @@ import { DEFAULT_FIPS_WEBSOCKET_SEED_URLS } from '../../../src/lib/webvmFipsConf
 
 import { recipientFromJoinRequest } from './webvm-exit-admin.js';
 
-export function runStandardApproval({
+function runStandardApproval({
 	fixture,
 	request,
 	dataDir,
@@ -104,4 +104,36 @@ export function runStandardApproval({
 			finish(resolve, events);
 		});
 	});
+}
+
+export async function approveAndWaitForGuestRoster({ fixture, request, dataDir, guestRosterApplied }) {
+	const attempts = Number.parseInt(process.env.NVPN_STANDARD_APPROVAL_ATTEMPTS || '3', 10);
+	if (!Number.isInteger(attempts) || attempts < 1)
+		throw new Error('NVPN_STANDARD_APPROVAL_ATTEMPTS must be a positive integer');
+	const approvalEvents = [];
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		approvalEvents.push(...await runStandardApproval({
+			fixture,
+			request,
+			dataDir,
+			isGuestRosterApplied: () => guestRosterApplied(`concurrent signed-roster attempt ${attempt}`),
+		}));
+		if (await guestRosterApplied(`signed-roster attempt ${attempt}`)) {
+			return [
+				...approvalEvents,
+				{
+					ok: true,
+					event: 'delivered',
+					recipient: recipientFromJoinRequest(request),
+				},
+			];
+		}
+		if (attempt === attempts) {
+			throw new Error(
+				`signed roster was not applied after ${attempts} delivery attempts\n` +
+					approvalEvents.map((event) => JSON.stringify(event)).join('\n'),
+			);
+		}
+	}
+	throw new Error('signed roster approval attempts unexpectedly exhausted');
 }

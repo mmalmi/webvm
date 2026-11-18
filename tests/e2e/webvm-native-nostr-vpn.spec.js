@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -24,7 +24,8 @@ import { assertApprovedJoinRequest } from './helpers/webvm-control-readiness.js'
 import { waitForAutomaticPrivateExit } from './helpers/webvm-exit-readiness.js';
 import { waitForPrivateExitInternet } from './helpers/webvm-internet-readiness.js';
 import { parseSerialCommandResult } from './helpers/webvm-serial-command.js';
-import { runStandardApproval } from './helpers/webvm-standard-approval.js';
+import { approveAndWaitForGuestRoster } from './helpers/webvm-standard-approval.js';
+import { approveWithCli, supportsCliApproval } from './helpers/webvm-cli-approval.js';
 
 const REAL_E2E_ENABLED = process.env.NVPN_WEBVM_REAL_E2E === '1';
 const EXIT_ADMIN_CONFIG = process.env.NVPN_WEBVM_EXIT_ADMIN_CONFIG?.trim();
@@ -144,39 +145,6 @@ async function guestApprovalPathReady(page) {
 	}
 }
 
-async function approveAndWaitForGuestRoster({ fixture, request, dataDir, page }) {
-	const attempts = Number.parseInt(process.env.NVPN_STANDARD_APPROVAL_ATTEMPTS || '3', 10);
-	if (!Number.isInteger(attempts) || attempts < 1)
-		throw new Error('NVPN_STANDARD_APPROVAL_ATTEMPTS must be a positive integer');
-	const approvalEvents = [];
-	for (let attempt = 1; attempt <= attempts; attempt += 1) {
-		approvalEvents.push(...await runStandardApproval({
-			fixture,
-			request,
-			dataDir,
-			isGuestRosterApplied: () => guestRosterApplied(
-				page, `concurrent signed-roster attempt ${attempt}`,
-			),
-		}));
-		if (await guestRosterApplied(page, `signed-roster attempt ${attempt}`)) {
-			return [
-				...approvalEvents,
-				{
-					ok: true,
-					event: 'delivered',
-					recipient: recipientFromJoinRequest(request),
-				},
-			];
-		}
-		if (attempt === attempts) {
-			throw new Error(
-				`signed roster was not applied after ${attempts} delivery attempts\n` +
-					approvalEvents.map((event) => JSON.stringify(event)).join('\n'),
-			);
-		}
-	}
-	throw new Error('signed roster approval attempts unexpectedly exhausted');
-}
 test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', async ({ page }) => {
 	test.setTimeout(1_200_000);
 	expect(LIVE_ROSTER_TIMEOUT_MS).toBeGreaterThan(0);
@@ -189,11 +157,25 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		if (browserFipsLogs.length > 200) browserFipsLogs.shift();
 	});
 	const fixture = inspectNativeFixture();
-	const dataDir = mkdtempSync(path.join(tmpdir(), 'nvpn-standard-join-e2e-'));
 	const exitAdmin = EXIT_ADMIN_CONFIG ? {
 		binary: path.resolve(process.env.NVPN_WEBVM_EXIT_ADMIN_BIN?.trim() || fixture.binary),
 		config: path.resolve(EXIT_ADMIN_CONFIG),
 	} : null;
+	const legacyExample = existsSync(path.join(path.dirname(fixture.manifest), 'examples/standard_join_approval_e2e.rs'));
+	const approvalBinaryForCli = exitAdmin && !EXIT_ADMIN_EXCLUSIVE ? exitAdmin.binary : fixture.binary;
+	const cliApproval = !legacyExample && supportsCliApproval(approvalBinaryForCli);
+	if (!legacyExample && !cliApproval && (!exitAdmin || EXIT_ADMIN_EXCLUSIVE)) {
+		throw new Error('The verified native fixture needs the join-requests approve command');
+	}
+	const dataDir = mkdtempSync(path.join(tmpdir(), 'nvpn-standard-join-e2e-'));
+	const approve = (request, adminConfig) => {
+		const guestApplied = (label) => guestRosterApplied(page, label);
+		if (cliApproval) return approveWithCli({
+			binary: approvalBinaryForCli, adminConfig, dataDir, request,
+			waitUntil, guestApplied, timeoutMs: LIVE_ROSTER_TIMEOUT_MS,
+		});
+		return approveAndWaitForGuestRoster({ fixture, dataDir, request, guestRosterApplied: guestApplied });
+	};
 	let joinedRecipient = '';
 	let expectedExit = '';
 	let exitOutboxBefore = new Set();
@@ -208,7 +190,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 		if (EXIT_ADMIN_EXCLUSIVE) stageExitAdminConfig(exitAdmin.config, dataDir);
 	}
 	try {
-		const approvalBinary = exitAdmin && !EXIT_ADMIN_EXCLUSIVE
+		const approvalBinary = !cliApproval && exitAdmin && !EXIT_ADMIN_EXCLUSIVE
 			? await prepareLiveExitApproval({ fixture }) : null;
 		await page.goto('/v86?webvm-e2e=1');
 		await attachSerial(page);
@@ -296,9 +278,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 				stopExitAdminService();
 				exitServiceStopped = true;
 				try {
-					approvalEvents = await approveAndWaitForGuestRoster({
-						fixture, request, dataDir, page,
-					});
+					approvalEvents = await approve(request);
 				} finally {
 					startExitAdminService();
 					exitServiceStopped = false;
@@ -314,6 +294,9 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					'add-device', '--device', joinedRecipient, '--json',
 				]);
 				runExitAdmin(exitAdmin.binary, exitAdmin.config, ['reload']);
+			} else if (exitAdmin && cliApproval) {
+				joinedRecipient = recipientFromJoinRequest(request);
+				approvalEvents = await approve(request, exitAdmin.config);
 			} else if (exitAdmin) {
 				joinedRecipient = recipientFromJoinRequest(request);
 				stageLiveExitApproval({
@@ -336,9 +319,7 @@ test('ordinary nVPN pairing crosses WSS and can use its approving FIPS exit', as
 					{ ok: true, event: 'delivered', recipient: joinedRecipient },
 				];
 			} else {
-				approvalEvents = await approveAndWaitForGuestRoster({
-					fixture, request, dataDir, page,
-				});
+				approvalEvents = await approve(request);
 			}
 		} catch (error) {
 			let guest;

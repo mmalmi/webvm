@@ -59,10 +59,14 @@ NVPN_WEBVM_FIPS_VERSION=<pinned-fips-version> \
   npx playwright test tests/e2e/webvm-native-nostr-vpn.spec.js
 ```
 
-On macOS, `NVPN_WEBVM_EXIT_ADMIN_EXCLUSIVE=1` briefly boots out the standard
-nVPN LaunchDaemon while the ordinary join helper owns the same admin identity.
-The test restores the daemon immediately afterward and attempts restoration
-again during cleanup.
+Native revisions that removed the approval example use the shipping
+`nvpn join-requests approve` command. The test waits for the guest to apply the
+signed roster. Without an exit-admin config it starts a disposable daemon. Run this
+mode in a dedicated test environment with permission to create a tunnel.
+
+On macOS, exclusive exit-admin mode stops the standard nVPN LaunchDaemon while the
+test owns the same admin identity, then restores it. Non-exclusive mode uses the
+running admin daemon. Older native fixtures retain their matching approval helper.
 
 Set `NVPN_WEBVM_E2E_BASE_URL=https://webvm.iris.to` to run the same acceptance
 test against the deployed WebVM instead of the local preview.
