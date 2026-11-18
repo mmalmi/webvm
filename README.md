@@ -134,14 +134,16 @@ Production verification:
 npm run test:production
 ```
 
-After the build and browser checks pass, stage a copy of the production build
-in a new directory for the Hashtree `webvm-site` release.
+After the build and browser checks pass, set `IRIS_NATIVE_RELEASE_GATE` to the
+absolute path of `scripts/native-release-gate.mjs` in the approved Iris Sites
+checkout and run:
 
 ```sh
-npm run stage:hashtree -- /path/to/new-stage
-cd /path/to/new-stage
-htree add . --publish webvm-site
+node scripts/release-webvm-hashtree.mjs /path/to/new-stage
 ```
+
+The command stages the production build and boots the WebVM guest through a
+fresh native Iris Drive profile before promoting the Hashtree `webvm-site` ref.
 
 The staging step splits guest files into small directories for the Iris Drive
 bridge. The attested guest, preinitialized state, and HTTPS build retain their
