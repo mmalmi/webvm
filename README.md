@@ -134,11 +134,10 @@ Production verification:
 npm run test:production
 ```
 
-For Hashtree, stage the verified production build in a new directory before
-publishing its contents to `webvm-site`.
+After the build and browser checks pass, stage a copy of the production build
+in a new directory for the Hashtree `webvm-site` release.
 
 ```sh
-npm run test:release
 npm run stage:hashtree -- /path/to/new-stage
 cd /path/to/new-stage
 htree add . --publish webvm-site
