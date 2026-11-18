@@ -5,7 +5,7 @@
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 	import { attachWebvmDisk, clearWebvmDisk } from '$lib/webvmDisk.js';
-	import { installRootfsBridgeRouting, installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
+	import { installRootfsRequestHandling } from '$lib/webvmRootfsFetch.js';
 	import { prepareWebvmOffline } from '$lib/webvmOffline.js';
 	import { WEBVM_MEMORY_BYTES } from '$lib/webvmGuestConfig.js';
 	import '$lib/global.css';
@@ -55,8 +55,7 @@ ${WELCOME_BORDER}
 	let diskUsageBytes = null;
 	let resettingVm = false;
 	let fipsHost = null;
-	let restoreRootfsFetch = null;
-	let restoreRootfsRouting;
+	let restoreRootfsRequests = null;
 	let terminalReady = false;
 	let startupOutput = '';
 	let resumeRequested = false;
@@ -420,8 +419,7 @@ ${WELCOME_BORDER}
 	}
 
 	onMount(() => {
-		restoreRootfsRouting = installRootfsBridgeRouting();
-		restoreRootfsFetch = installRootfsFetchCacheFallback();
+		restoreRootfsRequests = installRootfsRequestHandling();
 		publishDebugState();
 		void initializeSerialTerminal().then(() => bootV86());
 	});
@@ -439,9 +437,8 @@ ${WELCOME_BORDER}
 		serialTerminal = null;
 		diskController?.dispose();
 		diskController = null;
-		restoreRootfsRouting?.();
-		restoreRootfsFetch?.();
-		restoreRootfsFetch = null;
+		restoreRootfsRequests?.();
+		restoreRootfsRequests = null;
 		void fipsHost?.stop?.();
 		void emulator?.destroy?.();
 		if (localDiagnosticsEnabled()) delete globalThis.irisWebvmV86;

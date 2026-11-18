@@ -82,3 +82,12 @@ export function installRootfsBridgeRouting(target = globalThis) {
 		if (prototype.open === routedOpen) prototype.open = open;
 	};
 }
+
+export function installRootfsRequestHandling(target = globalThis) {
+	const restoreRouting = installRootfsBridgeRouting(target);
+	const restoreFetch = installRootfsFetchCacheFallback({ target });
+	return () => {
+		restoreRouting?.();
+		restoreFetch();
+	};
+}
