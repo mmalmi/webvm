@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { createRootfsFetchWithCacheFallback } from '../../src/lib/webvmRootfsFetch.js';
+import { createRootfsFetchWithCacheFallback, installRootfsBridgeRouting } from '../../src/lib/webvmRootfsFetch.js';
 
 const ROOTFS_URL = 'https://webvm.iris.to/v86/guest/rootfs/98d1f850.bin.zst';
 
@@ -43,4 +43,35 @@ test('rootfs fetch does not retry unrelated, non-GET, or already bypassed reques
 		await expect(fetchWithFallback(input, init)).rejects.toThrow('Failed to fetch');
 		expect(calls).toBe(1);
 	}
+});
+
+test('v86 guest XHR sends legacy filenames to their native bridge shards before any worker controls the page', () => {
+	const bridge = 'http://webvm-site.example.iris.localhost:17321';
+	const flat = '/v86/guest/rootfs/98d1f850.bin.zst';
+	const sharded = '/v86/guest/rootfs/9/8/98d1f850.bin.zst';
+	const calls = [];
+	class TestXhr {
+		open(...args) {
+			calls.push(args);
+		}
+	}
+	const original = TestXhr.prototype.open;
+	const request = new TestXhr();
+	const restore = installRootfsBridgeRouting({ location: { href: bridge + '/' }, XMLHttpRequest: TestXhr });
+	request.open('GET', flat, true);
+	request.open('GET', bridge + sharded);
+	request.open('GET', ROOTFS_URL);
+	request.open('GET', flat + '?token=test');
+	request.open('POST', flat);
+	restore();
+	expect(calls).toEqual([
+		['GET', bridge + sharded, true],
+		['GET', bridge + sharded],
+		['GET', ROOTFS_URL],
+		['GET', flat + '?token=test'],
+		['POST', flat],
+	]);
+	expect(TestXhr.prototype.open).toBe(original);
+	expect(installRootfsBridgeRouting({ location: { href: ROOTFS_URL }, XMLHttpRequest: TestXhr })).toBeUndefined();
+	expect(TestXhr.prototype.open).toBe(original);
 });

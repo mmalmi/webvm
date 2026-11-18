@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { isWebvmRootfsPath } from '../../src/lib/webvmRootfsPath.js';
 
 const origin = 'https://webvm.iris.to';
-const source = readFileSync('src/service-worker.js', 'utf8').replace(/^import .*;\n/u, '');
+const source = readFileSync('src/service-worker.js', 'utf8').replace(/^import .*;\n/gmu, '');
 const rootfs = '/v86/guest/rootfs/1234abcd.bin.zst';
+const shardedRootfs = '/v86/guest/rootfs/1/2/1234abcd.bin.zst';
 
 function worker(version = 'one', stores = new Map()) {
 	const listeners = new Map();
@@ -36,7 +38,7 @@ function worker(version = 'one', stores = new Map()) {
 	};
 	runInNewContext(source, {
 		build: ['/_app/immutable/app.js'], files: ['/favicon.ico'], prerendered: ['/', '/v86'], version,
-		URL, Response, caches, fetch,
+		URL, Response, caches, fetch, isWebvmRootfsPath,
 		Request: class extends Request {
 			constructor(url, options) { super(new URL(url, origin), options); }
 		},
@@ -73,9 +75,10 @@ test('offline cache is scoped to shipped app assets and lazy guest files', async
 	const reads = current.requests.length;
 	assert.equal(await (await current.request(rootfs)).text(), `one:${rootfs}`);
 	assert.equal(current.requests.length, reads);
+	assert.equal(await (await current.request(shardedRootfs)).text(), `one:${shardedRootfs}`);
 	for (const [path, options] of [
 		['/private/session'], ['/serviceWorker.js'], ['https://other.example/v86/v86.wasm'],
-		[`${rootfs}?token=private`], [rootfs, { method: 'POST' }],
+		['/v86/guest/rootfs/3/4/1234abcd.bin.zst'], [`${rootfs}?token=private`], [rootfs, { method: 'POST' }],
 		[rootfs, { headers: { Authorization: 'Bearer private' } }],
 		[rootfs, { headers: { Range: 'bytes=0-9' } }],
 	]) assert.equal(current.request(path, options), undefined, path);

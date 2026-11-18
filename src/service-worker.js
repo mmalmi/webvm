@@ -1,9 +1,9 @@
 import { build, files, prerendered, version } from '$service-worker';
+import { isWebvmRootfsPath } from './lib/webvmRootfsPath.js';
 
 const PREFIX = 'iris-webvm:';
 const CACHE = `${PREFIX}app-${version}`;
 const ROOTFS_CACHE = `${PREFIX}rootfs-v1`;
-const ROOTFS = /^\/v86\/guest\/rootfs\/[0-9a-f]{8}\.bin\.zst$/u;
 const STATE_CHUNK = /^\/v86\/guest\/state\/state-[0-9]+\.bin$/u;
 const ASSETS = new Set([
 	...build, ...files, ...prerendered,
@@ -42,7 +42,7 @@ self.addEventListener('fetch', (event) => {
 	if (request.method !== 'GET' || url.origin !== self.location.origin
 		|| request.headers.has('authorization') || request.headers.has('range')
 		|| (url.search && !page)) return;
-	const rootfs = ROOTFS.test(url.pathname);
+	const rootfs = isWebvmRootfsPath(url.pathname);
 	if (!rootfs && !ASSETS.has(url.pathname) && !STATE_CHUNK.test(url.pathname)) return;
 	event.respondWith((async () => {
 		const cache = await caches.open(rootfs ? ROOTFS_CACHE : CACHE).catch(() => null);

@@ -134,6 +134,20 @@ Production verification:
 npm run test:production
 ```
 
+For Hashtree, stage the verified production build in a new directory before
+publishing its contents to `webvm-site`.
+
+```sh
+npm run test:release
+npm run stage:hashtree -- /path/to/new-stage
+cd /path/to/new-stage
+htree add . --publish webvm-site
+```
+
+The staging step splits guest files into small directories for the Iris Drive
+bridge. The attested guest, preinitialized state, and HTTPS build retain their
+original filenames and bytes.
+
 ## Licence
 
 The WebVM application code retains its original Apache-2.0 licence. v86 and bundled third-party components remain under their respective licences; see [LICENSE.txt](LICENSE.txt) and the licence files shipped with the runtime assets.

@@ -8,6 +8,7 @@
 		"verify:dependencies": "node scripts/verify-vendored-dependencies.mjs",
 		"lint": "npm run verify:dependencies && node scripts/check-source-quality.mjs",
 		"build": "node scripts/assert-v86-guest-assets.mjs && vite build && node scripts/assert-webvm-build.mjs",
+		"stage:hashtree": "node scripts/stage-webvm-hashtree.mjs",
 		"guest:build": "bash scripts/build-v86-guest.sh && npm run state:build",
 		"state:build": "node scripts/build-v86-state.mjs",
 		"preview": "vite preview --host 127.0.0.1",

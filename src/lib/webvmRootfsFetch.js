@@ -1,4 +1,4 @@
-const CONTENT_ADDRESSED_ROOTFS_PATH = /^\/v86\/guest\/rootfs\/[0-9a-f]{8}\.bin\.zst$/u;
+import { isWebvmRootfsPath, shardedWebvmRootfsPath } from './webvmRootfsPath.js';
 
 function requestUrl(input, baseUrl) {
 	const value = typeof input === 'string' || input instanceof URL ? input : input?.url;
@@ -32,7 +32,7 @@ export function createRootfsFetchWithCacheFallback(fetchImpl, {
 			const canRetry = requestMethod(input, init) === 'GET'
 				&& requestCacheMode(input, init) !== 'no-store'
 				&& url
-				&& CONTENT_ADDRESSED_ROOTFS_PATH.test(url.pathname);
+				&& isWebvmRootfsPath(url.pathname);
 			if (!canRetry) throw error;
 
 			onFallback(error, url);
@@ -55,5 +55,30 @@ export function installRootfsFetchCacheFallback({
 	target.fetch = wrappedFetch;
 	return () => {
 		if (target.fetch === wrappedFetch) target.fetch = nativeFetch;
+	};
+}
+
+// v86 reads guest files with XMLHttpRequest, including filenames restored
+// from saved filesystem state. Rewrite before network or service worker lookup.
+export function installRootfsBridgeRouting(target = globalThis) {
+	const page = requestUrl(target.location?.href);
+	const prototype = target.XMLHttpRequest?.prototype;
+	if (!prototype || page?.protocol !== 'http:' || !page.hostname.endsWith('.iris.localhost')) return;
+
+	const open = prototype.open;
+	function routedOpen(method, input, ...options) {
+		const url = String(method).toUpperCase() === 'GET' ? requestUrl(input, page.href) : null;
+		if (url?.origin === page.origin && !url.search && !url.hash) {
+			const sharded = shardedWebvmRootfsPath(url.pathname);
+			if (sharded) {
+				url.pathname = sharded;
+				input = url.href;
+			}
+		}
+		return open.call(this, method, input, ...options);
+	}
+	prototype.open = routedOpen;
+	return () => {
+		if (prototype.open === routedOpen) prototype.open = open;
 	};
 }

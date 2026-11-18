@@ -5,7 +5,7 @@
 	import { createWebvmFipsHost } from '$lib/webvmFipsHost.js';
 	import { clearWebvmFipsIdentity } from '$lib/webvmFipsIdentity.js';
 	import { attachWebvmDisk, clearWebvmDisk } from '$lib/webvmDisk.js';
-	import { installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
+	import { installRootfsBridgeRouting, installRootfsFetchCacheFallback } from '$lib/webvmRootfsFetch.js';
 	import { prepareWebvmOffline } from '$lib/webvmOffline.js';
 	import { WEBVM_MEMORY_BYTES } from '$lib/webvmGuestConfig.js';
 	import '$lib/global.css';
@@ -56,6 +56,7 @@ ${WELCOME_BORDER}
 	let resettingVm = false;
 	let fipsHost = null;
 	let restoreRootfsFetch = null;
+	let restoreRootfsRouting;
 	let terminalReady = false;
 	let startupOutput = '';
 	let resumeRequested = false;
@@ -419,6 +420,7 @@ ${WELCOME_BORDER}
 	}
 
 	onMount(() => {
+		restoreRootfsRouting = installRootfsBridgeRouting();
 		restoreRootfsFetch = installRootfsFetchCacheFallback();
 		publishDebugState();
 		void initializeSerialTerminal().then(() => bootV86());
@@ -437,6 +439,7 @@ ${WELCOME_BORDER}
 		serialTerminal = null;
 		diskController?.dispose();
 		diskController = null;
+		restoreRootfsRouting?.();
 		restoreRootfsFetch?.();
 		restoreRootfsFetch = null;
 		void fipsHost?.stop?.();
